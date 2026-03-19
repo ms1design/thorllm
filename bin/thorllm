@@ -13,17 +13,23 @@ TPL_DIR="${SELF_DIR}/templates"
 source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/config.sh"
 
-# ── Load user config if it exists ────────────────────────────────────────────
-CONFIG_FILE="${CONFIG_FILE:-${BUILD_PATH}/vllm-thor.conf}"
-[[ -f "${CONFIG_FILE}" ]] && config_load "${CONFIG_FILE}"
-
-VERSION="0.1.0"
+# ── Load VERSION file (auto) or env (manual override) ────────────────────────
+if [[ -n "${THORLLM_VERSION:-}" ]]; then
+    VERSION="${THORLLM_VERSION}"
+elif [[ -f "${SELF_DIR}/VERSION" ]]; then
+    VERSION=$(cat "${SELF_DIR}/VERSION")
+else
+    VERSION="0.0.0"
+fi
 
 usage() {
+    echo ""
+    echo ""
     usage_logo
     echo ""
+    echo ""
     cat <<EOF
-vllm-thor ${VERSION} — vLLM manager for NVIDIA Jetson Thor
+vllm-thor ${VERSION} — vLLM ${VLLM_VERSION} manager for NVIDIA Jetson Thor
 
 Usage:
   vllm-thor <command> [options]
@@ -46,7 +52,7 @@ Models:
   model switch <org/name> Switch the active model
   model select           Interactive model selection
   model show <org/name>  Print the model config YAML
-  model edit <org/name>  Open model config in $EDITOR
+  model edit <org/name>  Open model config in \$EDITOR
 
 Info:
   version                Show installed vLLM and dependency versions
