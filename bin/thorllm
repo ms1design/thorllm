@@ -42,6 +42,7 @@ ${CYAN}Models:${NC}
   model list             List available model configs
   model add <org/name>   Create a new model config from template
   model switch <org/name> Switch the active model
+  model select           Interactive model selection
   model show <org/name>  Print the model config YAML
   model edit <org/name>  Open model config in \$EDITOR
 
@@ -135,7 +136,9 @@ case "${CMD:-}" in
                     model_show "${MODEL_ARG}" ;;
             edit)   [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model edit <org/name>"
                     model_edit "${MODEL_ARG}" ;;
-            *)      die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch show edit" ;;
+            select) [[ -z "${MODEL_ARG}" ]] && { source "${SELF_DIR}/tui/wizard.sh"; _model_select_interactive; }
+                    die "Usage: vllm-thor model select" ;;
+            *)      die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch show edit select" ;;
         esac
         ;;
     version)

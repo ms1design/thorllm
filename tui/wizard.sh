@@ -1,6 +1,7 @@
 #!/bin/bash
 # tui/wizard.sh — interactive setup wizard using whiptail
-# Sources: common.sh, config.sh, install.sh, service.sh
+# Sources: common.sh, config.sh, install.sh, service.sh, model.sh
+# =============================================================================
 # =============================================================================
 
 # ── whiptail wrapper helpers ──────────────────────────────────────────────────

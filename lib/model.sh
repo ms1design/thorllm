@@ -91,3 +91,27 @@ model_edit() {
     [[ -f "${yaml_file}" ]] || die "Config not found: ${yaml_file}\n  Create it first: thorllm model add ${model}"
     "${EDITOR:-nano}" "${yaml_file}"
 }
+
+_model_select_interactive() {
+    local models=()
+    local active; active=$(grep '^SERVE_MODEL=' "${BUILD_PATH}/vllm.env" 2>/dev/null \
+        | cut -d= -f2 || echo "${SERVE_MODEL}")
+
+    if [[ -d "${MODELS_DIR}" ]] && [[ -n "$(ls -A "${MODELS_DIR}" 2>/dev/null)" ]]; then
+        while read -r f; do
+            local rel; rel=$(realpath --relative-to="${MODELS_DIR}" "${f}" | sed 's/\.yaml$//')
+            if [[ "${rel}" == "${active}" ]]; then
+                models+=("${rel}" "${rel} (active)" ON)
+            else
+                models+=("${rel}" "${rel}" OFF)
+            fi
+        done < <(find "${MODELS_DIR}" -name "*.yaml" ! -path "*/example/*" | sort)
+    fi
+
+    [[ ${#models[@]} -eq 0 ]] && { warn "No model configs found. Run: thorllm model add <org/name>"; return 1; }
+
+    local choice
+    choice=$(_wt_checklist "Select model" "Choose active model:" "${models[@]}") || return 1
+
+    [[ -n "${choice}" ]] && model_switch "${choice}"
+}
