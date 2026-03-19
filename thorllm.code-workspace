@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "name": "thorllm",
+      "path": "."
+    },
+    {
+      "name": "user-config",
+      "path": "~/thorllm"
+    }
+  ],
+  "settings": {}
+}
