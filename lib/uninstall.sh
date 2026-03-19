@@ -3,7 +3,8 @@
 # Sources: common.sh, config.sh (must be loaded first)
 # =============================================================================
 
-UNINSTALL_DIR="${UNINSTALL_DIR:-${SELF_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+LIB_DIR="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+BIN_DIR="${BIN_DIR:-${HOME}/.local/bin}"
 
 # ── Uninstall confirmation ────────────────────────────────────────────────────
 confirm_uninstall() {
@@ -19,7 +20,7 @@ confirm_uninstall() {
     echo "  • Environment file at ${BUILD_PATH}/vllm.env"
     echo "  • Activation script at ${BUILD_PATH}/activate_vllm.sh"
     echo "  • Thorllm CLI symlink at ${BIN_DIR}/thorllm"
-    echo "  • Thorllm repo at ${UNINSTALL_DIR}"
+    echo "  • Thorllm repo at ${LIB_DIR}"
     echo ""
     echo -e "${YELLOW}NOTE: Your home directory and HuggingFace cache will NOT be deleted.${NC}"
     echo ""
@@ -92,22 +93,20 @@ remove_build() {
 remove_thorllm() {
     step "Removing thorllm installation"
 
-    local cli_path="${HOME}/.local/bin/thorllm"
-
-    if [[ -d "${UNINSTALL_DIR}" ]]; then
-        info "Removing thorllm repo at ${UNINSTALL_DIR}…"
-        rm -rf "${UNINSTALL_DIR}"
+    if [[ -d "${LIB_DIR}" ]]; then
+        info "Removing thorllm repo at ${LIB_DIR}…"
+        rm -rf "${LIB_DIR}"
         success "Thorllm repo removed."
     else
-        info "Thorllm repo not found: ${UNINSTALL_DIR}"
+        info "Thorllm repo not found: ${LIB_DIR}"
     fi
 
-    if [[ -L "${cli_path}" ]]; then
-        info "Removing CLI symlink at ${cli_path}…"
-        rm -f "${cli_path}"
+    if [[ -L "${BIN_DIR}/thorllm" ]]; then
+        info "Removing CLI symlink at ${BIN_DIR}/thorllm…"
+        rm -f "${BIN_DIR}/thorllm"
         success "CLI symlink removed."
     else
-        info "CLI symlink not found: ${cli_path}"
+        info "CLI symlink not found: ${BIN_DIR}/thorllm"
     fi
 }
 
