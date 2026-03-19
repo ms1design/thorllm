@@ -33,6 +33,7 @@ CUDSS_VERSION="${CUDSS_VERSION:-0.7.1}"
 VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
 MODELS_DIR="${BUILD_PATH}/models"
 TPL_DIR="${TPL_DIR:-${HOME}/.local/share/thorllm/templates}"
+THORLLM_LIB="${THORLLM_LIB:-${HOME}/.local/share/thorllm/lib}"
 
 # ── Load config from file ─────────────────────────────────────────────────────
 config_load() {
