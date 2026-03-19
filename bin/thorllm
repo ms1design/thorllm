@@ -49,6 +49,9 @@ ${CYAN}Info:${NC}
   version                Show installed vLLM and dependency versions
   config                 Show current configuration
 
+${CYAN}System:${NC}
+  uninstall              Remove thorllm and all installed components
+
 ${CYAN}Options:${NC}
   -h, --help             Show this help
   --no-color             Disable colour output
@@ -97,6 +100,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         version)       CMD=version; shift ;;
         config)        CMD=config_show; shift ;;
+        uninstall)     CMD=uninstall; shift ;;
         *)             die "Unknown command: $1. Run 'vllm-thor --help'" ;;
     esac
 done
@@ -141,6 +145,10 @@ case "${CMD:-}" in
     config_show)
         source "${LIB_DIR}/config.sh"
         config_show
+        ;;
+    uninstall)
+        source "${LIB_DIR}/uninstall.sh"
+        run_uninstall
         ;;
     *)
         usage; exit 1
