@@ -2,7 +2,6 @@
 # tui/wizard.sh — interactive setup wizard using whiptail
 # Sources: common.sh, config.sh, install.sh, service.sh, model.sh
 # =============================================================================
-# =============================================================================
 
 # ── whiptail wrapper helpers ──────────────────────────────────────────────────
 _wt_input() {
@@ -41,8 +40,11 @@ _wt_checklist() {
 
 # ── Wizard pages ──────────────────────────────────────────────────────────────
 _page_welcome() {
+    local logo; logo=$(usage_logo)
     _wt_msg "thorllm setup" \
-"Welcome to thorllm — vLLM manager for NVIDIA Jetson Thor.
+"${logo}
+
+Welcome to thorllm — vLLM manager for NVIDIA Jetson Thor.
 
 This wizard will configure your installation.
 

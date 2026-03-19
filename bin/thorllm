@@ -20,6 +20,8 @@ CONFIG_FILE="${CONFIG_FILE:-${BUILD_PATH}/vllm-thor.conf}"
 VERSION="0.1.0"
 
 usage() {
+    usage_logo
+    echo ""
     cat <<EOF
 ${CYAN}vllm-thor${NC} ${VERSION} — vLLM manager for NVIDIA Jetson Thor
 

@@ -12,15 +12,17 @@ REPO_URL="${REPO_URL:-https://github.com/ms1design/thorllm.git}"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/share/thorllm}"
 BIN_DIR="${BIN_DIR:-${HOME}/.local/bin}"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
-info()    { echo -e "${CYAN}[thorllm]${NC} $*"; }
-success() { echo -e "${GREEN}[thorllm]${NC} $*"; }
-die()     { echo -e "${RED}[thorllm]${NC} $*" >&2; exit 1; }
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SELF_DIR}/lib/common.sh"
 
 command -v git  &>/dev/null || die "git is required. Run: sudo apt-get install -y git"
 command -v curl &>/dev/null || die "curl is required. Run: sudo apt-get install -y curl"
 
 info "Installing thorllm to ${INSTALL_DIR}…"
+echo ""
+
+usage_logo
+echo ""
 
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "Updating existing install…"
@@ -44,8 +46,10 @@ for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
     fi
 done
 
-success "thorllm CLI installed at ${BIN_DIR}/thorllm"
 echo ""
+usage_logo
+echo ""
+success "thorllm CLI installed at ${BIN_DIR}/thorllm"
 echo "  Run the setup wizard:  thorllm setup"
 echo "  Or install directly:   thorllm install"
 echo "  Help:                  thorllm --help"
