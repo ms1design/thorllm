@@ -42,6 +42,7 @@ _wt_checklist() {
 _page_welcome() {
     local logo; logo=$(usage_logo)
     _wt_msg "thorllm setup" \
+\
 "${logo}
 
 Welcome to thorllm — vLLM manager for NVIDIA Jetson Thor.
