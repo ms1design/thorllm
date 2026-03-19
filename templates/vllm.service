@@ -1,0 +1,39 @@
+[Unit]
+Description=vLLM LLM Server (Jetson Thor)
+# Wait for network and local filesystems (cache / model volume must be mounted)
+After=network-online.target local-fs.target multi-user.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+WorkingDirectory=${BUILD_PATH}
+
+# All environment variables come from the EnvironmentFile.
+# To override a single variable without editing the file:
+#   sudo systemctl edit vllm
+#   [Service]
+#   Environment=KEY=value
+EnvironmentFile=${BUILD_PATH}/vllm.env
+
+ExecStart=${BUILD_PATH}/vllm-serve.sh
+
+# Restart on crash; wait 30 s before retry to avoid tight restart loops
+Restart=on-failure
+RestartSec=30
+
+# Give the model time to flush KV-cache and terminate gracefully
+TimeoutStopSec=60
+KillMode=control-group
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vllm
+
+# RemainAfterExit=no: service is considered stopped when the process exits,
+# even for a clean exit. Keeps Thor safe — no lingering state after shutdown.
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

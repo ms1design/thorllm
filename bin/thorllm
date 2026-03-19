@@ -1,0 +1,148 @@
+#!/bin/bash
+# =============================================================================
+# vllm-thor — CLI entry point
+# Usage: vllm-thor <command> [options]
+# =============================================================================
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"
+LIB_DIR="${SELF_DIR}/lib"
+TPL_DIR="${SELF_DIR}/templates"
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+source "${LIB_DIR}/config.sh"
+
+# ── Load user config if it exists ────────────────────────────────────────────
+CONFIG_FILE="${CONFIG_FILE:-${BUILD_PATH}/vllm-thor.conf}"
+[[ -f "${CONFIG_FILE}" ]] && config_load "${CONFIG_FILE}"
+
+VERSION="0.1.0"
+
+usage() {
+    cat <<EOF
+${CYAN}vllm-thor${NC} ${VERSION} — vLLM manager for NVIDIA Jetson Thor
+
+${CYAN}Usage:${NC}
+  vllm-thor <command> [options]
+
+${CYAN}Install:${NC}
+  setup                  Interactive TUI setup wizard
+  install                Run full install (non-interactive, uses config)
+  install --update       Update vLLM to latest version
+
+${CYAN}Service:${NC}
+  start                  Start the vLLM service
+  stop                   Stop the vLLM service
+  restart                Restart the vLLM service
+  status                 Show service status
+  logs [-f]              Show service logs (use -f to follow)
+
+${CYAN}Models:${NC}
+  model list             List available model configs
+  model add <org/name>   Create a new model config from template
+  model switch <org/name> Switch the active model
+  model show <org/name>  Print the model config YAML
+  model edit <org/name>  Open model config in \$EDITOR
+
+${CYAN}Info:${NC}
+  version                Show installed vLLM and dependency versions
+  config                 Show current configuration
+
+${CYAN}Options:${NC}
+  -h, --help             Show this help
+  --no-color             Disable colour output
+  --build-path <path>    Override BUILD_PATH (default: ~/vllm-thor)
+
+${CYAN}Environment:${NC}
+  BUILD_PATH             Installation directory  (default: ~/vllm-thor)
+  CACHE_ROOT             Cache root directory    (default: ~/.cache/vllm)
+  SERVE_MODEL            Active model            (default: openai/gpt-oss-120b)
+  HF_TOKEN               HuggingFace access token
+  REPO_URL               vllm-thor repo URL (for updates)
+
+${CYAN}Examples:${NC}
+  vllm-thor setup
+  vllm-thor model add Qwen/Qwen3-VL-32B-Instruct
+  vllm-thor model switch Qwen/Qwen3-VL-32B-Instruct
+  vllm-thor restart
+  vllm-thor logs -f
+EOF
+}
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+[[ $# -eq 0 ]] && { usage; exit 0; }
+
+FOLLOW_LOGS=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)     usage; exit 0 ;;
+        --no-color)    NO_COLOR=1; shift ;;
+        --build-path)  BUILD_PATH="$2"; shift 2 ;;
+        --update)      UPDATE=1; shift ;;
+        -f)            FOLLOW_LOGS=1; shift ;;
+        setup)         CMD=setup; shift ;;
+        install)       CMD=install; shift ;;
+        start)         CMD=start; shift ;;
+        stop)          CMD=stop; shift ;;
+        restart)       CMD=restart; shift ;;
+        status)        CMD=status; shift ;;
+        logs)          CMD=logs; shift ;;
+        model)
+            CMD=model
+            SUBCMD="${2:-}"
+            MODEL_ARG="${3:-}"
+            shift; [[ $# -gt 0 ]] && shift; [[ $# -gt 0 ]] && shift
+            ;;
+        version)       CMD=version; shift ;;
+        config)        CMD=config_show; shift ;;
+        *)             die "Unknown command: $1. Run 'vllm-thor --help'" ;;
+    esac
+done
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+case "${CMD:-}" in
+    setup)
+        source "${SELF_DIR}/tui/wizard.sh"
+        run_wizard
+        ;;
+    install)
+        source "${LIB_DIR}/install.sh"
+        run_install "${UPDATE:-0}"
+        ;;
+    start|stop|restart|status)
+        source "${LIB_DIR}/service.sh"
+        service_ctl "${CMD}"
+        ;;
+    logs)
+        source "${LIB_DIR}/service.sh"
+        service_logs "${FOLLOW_LOGS}"
+        ;;
+    model)
+        source "${LIB_DIR}/model.sh"
+        case "${SUBCMD:-}" in
+            list)   model_list ;;
+            add)    [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model add <org/name>"
+                    model_add "${MODEL_ARG}" ;;
+            switch) [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model switch <org/name>"
+                    model_switch "${MODEL_ARG}" ;;
+            show)   [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model show <org/name>"
+                    model_show "${MODEL_ARG}" ;;
+            edit)   [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model edit <org/name>"
+                    model_edit "${MODEL_ARG}" ;;
+            *)      die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch show edit" ;;
+        esac
+        ;;
+    version)
+        source "${LIB_DIR}/validate.sh"
+        show_versions
+        ;;
+    config_show)
+        source "${LIB_DIR}/config.sh"
+        config_show
+        ;;
+    *)
+        usage; exit 1
+        ;;
+esac

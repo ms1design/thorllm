@@ -1,0 +1,39 @@
+# vLLM serve config for ${MODEL_NAME}
+# Reference: https://docs.vllm.ai/en/stable/serving/openai_compatible_server.html
+#
+# This file is loaded via --config by vllm-serve.sh.
+# Hardcoded launcher args (max-num-seqs, host, etc.) always take precedence.
+# Edit here, then: sudo systemctl restart vllm
+
+model: ${MODEL_NAME}
+
+# ── Serving ───────────────────────────────────────────────────────────────────
+port: 8000
+served_model_name:
+  - ${MODEL_NAME}
+  - ${MODEL_SHORT}
+
+# ── Memory / parallelism ──────────────────────────────────────────────────────
+tensor_parallel_size: 1
+gpu_memory_utilization: 0.90
+max_model_len: 32768
+
+# ── Attention ─────────────────────────────────────────────────────────────────
+attention_backend: FLASHINFER
+
+# ── Performance ───────────────────────────────────────────────────────────────
+enable_chunked_prefill: true
+enable_prefix_caching: true
+
+# ── Quantization (uncomment as needed) ───────────────────────────────────────
+# quantization: fp8
+# kv_cache_dtype: fp8
+
+# ── Reasoning / speculative decoding (model-specific) ────────────────────────
+# reasoning_parser: qwen3
+# speculative_config:
+#   method: qwen3_next_mtp
+#   num_speculative_tokens: 2
+
+# ── Trust remote code (required for some HF models) ──────────────────────────
+# trust_remote_code: true
