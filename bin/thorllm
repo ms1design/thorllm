@@ -29,7 +29,7 @@ usage() {
     echo ""
     echo ""
     cat <<EOF
-vllm-thor ${VERSION} — vLLM ${VLLM_VERSION} manager for NVIDIA Jetson Thor
+vllm-thor ${VERSION} — vLLM${VLLM_VERSION:+ ${VLLM_VERSION}} manager for NVIDIA Jetson Thor
 
 Usage:
   vllm-thor <command> [options]
