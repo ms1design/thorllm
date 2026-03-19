@@ -22,58 +22,58 @@ VERSION="0.1.0"
 usage() {
     usage_logo
     echo ""
-    {
-        echo "${CYAN}vllm-thor${NC} ${VERSION} — vLLM manager for NVIDIA Jetson Thor"
-        echo ""
-        echo "${CYAN}Usage:${NC}"
-        echo "  vllm-thor <command> [options]"
-        echo ""
-        echo "${CYAN}Install:${NC}"
-        echo "  setup                  Interactive TUI setup wizard"
-        echo "  install                Run full install (non-interactive, uses config)"
-        echo "  install --update       Update vLLM to latest version"
-        echo ""
-        echo "${CYAN}Service:${NC}"
-        echo "  start                  Start the vLLM service"
-        echo "  stop                   Stop the vLLM service"
-        echo "  restart                Restart the vLLM service"
-        echo "  status                 Show service status"
-        echo "  logs [-f]              Show service logs (use -f to follow)"
-        echo ""
-        echo "${CYAN}Models:${NC}"
-        echo "  model list             List available model configs"
-        echo "  model add <org/name>   Create a new model config from template"
-        echo "  model switch <org/name> Switch the active model"
-        echo "  model select           Interactive model selection"
-        echo "  model show <org/name>  Print the model config YAML"
-        echo "  model edit <org/name>  Open model config in \$EDITOR"
-        echo ""
-        echo "${CYAN}Info:${NC}"
-        echo "  version                Show installed vLLM and dependency versions"
-        echo "  config                 Show current configuration"
-        echo ""
-        echo "${CYAN}System:${NC}"
-        echo "  uninstall              Remove thorllm and all installed components"
-        echo ""
-        echo "${CYAN}Options:${NC}"
-        echo "  -h, --help             Show this help"
-        echo "  --no-color             Disable colour output"
-        echo "  --build-path <path>    Override BUILD_PATH (default: ~/vllm-thor)"
-        echo ""
-        echo "${CYAN}Environment:${NC}"
-        echo "  BUILD_PATH             Installation directory  (default: ~/vllm-thor)"
-        echo "  CACHE_ROOT             Cache root directory    (default: ~/.cache/vllm)"
-        echo "  SERVE_MODEL            Active model            (default: openai/gpt-oss-120b)"
-        echo "  HF_TOKEN               HuggingFace access token"
-        echo "  REPO_URL               vllm-thor repo URL (for updates)"
-        echo ""
-        echo "${CYAN}Examples:${NC}"
-        echo "  vllm-thor setup"
-        echo "  vllm-thor model add Qwen/Qwen3-VL-32B-Instruct"
-        echo "  vllm-thor model switch Qwen/Qwen3-VL-32B-Instruct"
-        echo "  vllm-thor restart"
-        echo "  vllm-thor logs -f"
-    }
+    cat <<EOF
+vllm-thor ${VERSION} — vLLM manager for NVIDIA Jetson Thor
+
+Usage:
+  vllm-thor <command> [options]
+
+Install:
+  setup                  Interactive TUI setup wizard
+  install                Run full install (non-interactive, uses config)
+  install --update       Update vLLM to latest version
+
+Service:
+  start                  Start the vLLM service
+  stop                   Stop the vLLM service
+  restart                Restart the vLLM service
+  status                 Show service status
+  logs [-f]              Show service logs (use -f to follow)
+
+Models:
+  model list             List available model configs
+  model add <org/name>   Create a new model config from template
+  model switch <org/name> Switch the active model
+  model select           Interactive model selection
+  model show <org/name>  Print the model config YAML
+  model edit <org/name>  Open model config in $EDITOR
+
+Info:
+  version                Show installed vLLM and dependency versions
+  config                 Show current configuration
+
+System:
+  uninstall              Remove thorllm and all installed components
+
+Options:
+  -h, --help             Show this help
+  --no-color             Disable colour output
+  --build-path <path>    Override BUILD_PATH (default: ~/vllm-thor)
+
+Environment:
+  BUILD_PATH             Installation directory  (default: ~/vllm-thor)
+  CACHE_ROOT             Cache root directory    (default: ~/.cache/vllm)
+  SERVE_MODEL            Active model            (default: openai/gpt-oss-120b)
+  HF_TOKEN               HuggingFace access token
+  REPO_URL               vllm-thor repo URL (for updates)
+
+Examples:
+  vllm-thor setup
+  vllm-thor model add Qwen/Qwen3-VL-32B-Instruct
+  vllm-thor model switch Qwen/Qwen3-VL-32B-Instruct
+  vllm-thor restart
+  vllm-thor logs -f
+EOF
 }
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
