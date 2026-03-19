@@ -3,6 +3,10 @@
 # Sources: common.sh, config.sh, service.sh
 # =============================================================================
 
+[[ -f "${THORLLM_LIB}/common.sh" ]] && source "${THORLLM_LIB}/common.sh"
+source "${THORLLM_LIB}/config.sh"
+source "${THORLLM_LIB}/service.sh"
+
 _model_yaml_path() {
     local model="$1"
     local org; org=$(echo "${model}" | cut -d/ -f1)
