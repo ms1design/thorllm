@@ -426,5 +426,4 @@ run_install() {
     echo -e "  The API will be available at: http://localhost:${VLLM_PORT:-8000}/v1"
     echo -e "  Enable TAB completion:        thorllm completion"
     echo ""
-    print_footer
 }
