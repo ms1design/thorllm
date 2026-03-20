@@ -58,19 +58,19 @@ patched = original
 # Before: norm_before_gate: bool = False,
 # After:  norm_before_gate: bool = False,
 #         activation: str = "silu",  # ← ADDED for NVFP4/gated-activation models
-OLD_SIG = "        norm_before_gate: bool = False,"
-NEW_SIG = (
-    "        norm_before_gate: bool = False,\n"
-    "        activation: str = \"silu\",  # NVFP4/gated-activation models (patch_layernorm)"
-)
+# OLD_SIG = "        norm_before_gate: bool = False,"
+# NEW_SIG = (
+#     "        norm_before_gate: bool = False,\n"
+#     "        activation: str = \"silu\",  # NVFP4/gated-activation models (patch_layernorm)"
+# )
 
-if OLD_SIG in patched and NEW_SIG not in patched:
-    patched = patched.replace(OLD_SIG, NEW_SIG, 1)
-    print("  Applied: activation param added to __init__ signature")
-elif NEW_SIG in patched:
-    print("  ALREADY PATCHED: activation param in signature")
-else:
-    print("  WARNING: Could not find signature anchor — check layernorm.py manually")
+# if OLD_SIG in patched and NEW_SIG not in patched:
+#     patched = patched.replace(OLD_SIG, NEW_SIG, 1)
+#     print("  Applied: activation param added to __init__ signature")
+# elif NEW_SIG in patched:
+#     print("  ALREADY PATCHED: activation param in signature")
+# else:
+#     print("  WARNING: Could not find signature anchor — check layernorm.py manually")
 
 # ─── Patch 2: Store activation in __init__ body ───────────────────────────────
 # Before: self.norm_before_gate = norm_before_gate
