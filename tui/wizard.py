@@ -164,6 +164,54 @@ LoadingIndicator {
     color: #76b900;
 }
 
+/* ── nav button bar ── */
+#nav {
+    dock: bottom;
+    height: 3;
+    background: #0e1a00;
+    border-top: solid #2a3d00;
+    padding: 0 2;
+    align: right middle;
+}
+#nav .nav-spacer {
+    width: 1fr;
+}
+#nav Button {
+    min-width: 14;
+    height: 1;
+    margin: 0 1;
+    border: solid #2a3d00;
+    background: #162000;
+    color: #c8e88a;
+}
+#nav Button:focus {
+    border: solid #76b900;
+    background: #2d4700;
+    color: #a0d832;
+}
+#nav Button:hover {
+    background: #2d4700;
+    color: #a0d832;
+}
+#nav Button.-primary {
+    background: #2d4700;
+    border: solid #76b900;
+    color: #a0d832;
+    text-style: bold;
+}
+#nav Button.-primary:focus {
+    background: #3a5800;
+    border: solid #a0d832;
+}
+#nav Button.-cancel {
+    color: #5a7a20;
+    border: solid #2a3d00;
+}
+#nav Button.-cancel:hover {
+    color: #ffbd2e;
+    border: solid #5a7a20;
+}
+
 /* ── footer ── */
 Footer {
     background: #0e1a00;
@@ -290,7 +338,7 @@ import urllib.parse
 
 
 class WizardScreen(Screen):
-    """Base class: logo, step bar, content area, footer."""
+    """Base class: logo, step bar, content area, nav buttons."""
 
     STEP = ""
     STEP_NUM = ""
@@ -301,8 +349,42 @@ class WizardScreen(Screen):
             yield Static(self.STEP, classes="step-title")
             yield Static(self.STEP_NUM, classes="step-num")
 
-    def compose_footer(self) -> ComposeResult:
-        yield Footer()
+    def compose_nav(
+        self,
+        *,
+        show_prev: bool = True,
+        install: bool = False,
+    ) -> ComposeResult:
+        """Yield the bottom navigation button bar.
+
+        Args:
+            show_prev: Show the ← Prev button (hide on first screen).
+            install:   Use "✓ Install" instead of "Next →" on last screen.
+        """
+        with Horizontal(id="nav"):
+            yield Button("✕ Cancel", id="btn-cancel", classes="-cancel")
+            yield Static("", classes="nav-spacer")
+            if show_prev:
+                yield Button("← Prev", id="btn-prev")
+            if install:
+                yield Button("✓ Install", id="btn-install", classes="-primary")
+            else:
+                yield Button("Next →", id="btn-next", classes="-primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id
+        if bid == "btn-cancel":
+            self.app.action_exit_cancel()
+        elif bid == "btn-prev":
+            self.action_prev()
+        elif bid == "btn-next":
+            self.action_next()
+        elif bid == "btn-install":
+            # ServiceUserScreen uses action_summary; SummaryScreen uses action_install
+            if hasattr(self, "action_install"):
+                self.action_install()  # type: ignore[attr-defined]
+            else:
+                self.app.action_summary()
 
     def action_prev(self) -> None:
         if hasattr(self.app, "action_prev"):
@@ -320,8 +402,8 @@ class WelcomeScreen(WizardScreen):
     STEP = "Welcome"
     STEP_NUM = "1 / 7"
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,n", "next", "Next →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("enter,n", "next", "Next →", show=False),
     ]
 
     def __init__(self, version: str, build_path: str) -> None:
@@ -346,7 +428,7 @@ class WelcomeScreen(WizardScreen):
                 "  • systemd service user\n\n"
                 f"Config saved to: {self._build_path}/thorllm.conf"
             )
-        yield from self.compose_footer()
+        yield from self.compose_nav(show_prev=False)
 
     def on_mount(self) -> None:
         self.focus()
@@ -362,9 +444,9 @@ class PathsScreen(WizardScreen):
     STEP = "Installation Paths"
     STEP_NUM = "2 / 7"
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,n", "next", "Next →", show=True),
-        Binding("escape,b", "prev", "Prev ←", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("ctrl+n", "next", "Next →", show=False),
+        Binding("escape,b", "prev", "Prev ←", show=False),
     ]
 
     def __init__(self, build_path: str, cache_root: str) -> None:
@@ -384,10 +466,7 @@ class PathsScreen(WizardScreen):
                 classes="hint",
             )
             yield Input(value=self._cr, id="inp-cache", placeholder="~/.cache/vllm")
-            yield Static(
-                "Tab  focus next field    Ctrl+N  continue    Esc  back", classes="hint"
-            )
-        yield from self.compose_footer()
+        yield from self.compose_nav()
 
     def on_mount(self) -> None:
         self.query_one("#inp-build", Input).focus()
@@ -405,9 +484,9 @@ class PathsScreen(WizardScreen):
 
 class VersionScreen(WizardScreen):
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,n", "next", "Next →", show=True),
-        Binding("escape,b", "prev", "Prev ←", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("ctrl+n", "next", "Next →", show=False),
+        Binding("escape,b", "prev", "Prev ←", show=False),
     ]
 
     def __init__(
@@ -440,11 +519,7 @@ class VersionScreen(WizardScreen):
             yield ol
             yield Static("Or enter a custom version:", classes="field-label")
             yield Input(placeholder="e.g. 0.17.1", id="inp-custom")
-            yield Static(
-                "↑↓ navigate    Enter select    Ctrl+N continue    Esc back",
-                classes="hint",
-            )
-        yield from self.compose_footer()
+        yield from self.compose_nav()
 
     def on_mount(self) -> None:
         ol = self.query_one("#ol", OptionList)
@@ -479,9 +554,9 @@ class ModelScreen(WizardScreen):
     STEP = "Default Model"
     STEP_NUM = "5 / 7"
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,n", "next", "Next →", show=True),
-        Binding("escape,b", "prev", "Prev ←", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("ctrl+n", "next", "Next →", show=False),
+        Binding("escape,b", "prev", "Prev ←", show=False),
     ]
 
     def __init__(self, serve_model: str) -> None:
@@ -509,8 +584,7 @@ class ModelScreen(WizardScreen):
                 "Type in search box to find models • Select to use • No token needed for public search",
                 classes="hint",
             )
-            yield Static("Ctrl+N  continue    Esc  back", classes="hint")
-        yield from self.compose_footer()
+        yield from self.compose_nav()
 
     def on_mount(self) -> None:
         self.query_one("#spinner").display = False
@@ -555,9 +629,9 @@ class HFTokenScreen(WizardScreen):
     STEP = "HuggingFace Token"
     STEP_NUM = "6 / 7"
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,n", "next", "Next →", show=True),
-        Binding("escape,b", "prev", "Prev ←", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("ctrl+n", "next", "Next →", show=False),
+        Binding("escape,b", "prev", "Prev ←", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -570,8 +644,7 @@ class HFTokenScreen(WizardScreen):
                 classes="hint",
             )
             yield Input(password=True, id="inp-token", placeholder="hf_…")
-            yield Static("Ctrl+N  continue    Esc  back", classes="hint")
-        yield from self.compose_footer()
+        yield from self.compose_nav()
 
     def on_mount(self) -> None:
         self.query_one("#inp-token", Input).focus()
@@ -588,9 +661,9 @@ class ServiceUserScreen(WizardScreen):
     STEP = "Service User"
     STEP_NUM = "7 / 7"
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,i", "summary", "Install ✓", show=True),
-        Binding("escape,b", "prev", "Prev ←", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("ctrl+n", "action_summary", "Review →", show=False),
+        Binding("escape,b", "prev", "Prev ←", show=False),
     ]
 
     def __init__(self, service_user: str) -> None:
@@ -610,11 +683,16 @@ class ServiceUserScreen(WizardScreen):
                 "  Password is used only for these operations and never stored.",
                 classes="hint",
             )
-            yield Static("Ctrl+N  review summary    Esc  back", classes="hint")
-        yield from self.compose_footer()
+        yield from self.compose_nav(install=False)  # "Next →" goes to summary
 
     def on_mount(self) -> None:
         self.query_one("#inp-user", Input).focus()
+
+    def action_next(self) -> None:
+        """Next on step 7 goes to the summary screen."""
+        val = self.query_one("#inp-user", Input).value.strip() or self._user
+        self.app.config["SERVICE_USER"] = val
+        self.app.action_summary()
 
     def action_summary(self) -> None:
         val = self.query_one("#inp-user", Input).value.strip() or self._user
@@ -629,9 +707,9 @@ class SummaryScreen(WizardScreen):
     STEP = "Review & Install"
     STEP_NUM = ""
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back", show=True),
-        Binding("q", "app.exit_cancel", "Cancel", show=True),
-        Binding("enter,i", "install", "Install ✓", show=True),
+        Binding("escape,b", "prev", "Back", show=False),
+        Binding("q", "app.exit_cancel", "Cancel", show=False),
+        Binding("enter,i", "install", "Install ✓", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -654,24 +732,28 @@ class SummaryScreen(WizardScreen):
                 with Horizontal(classes="summary-row"):
                     yield Static(key, classes="summary-key")
                     yield Static(val, classes="summary-val")
-            yield Static(
-                "\nPress Enter or I to install, Esc to go back.", classes="hint"
-            )
-        yield from self.compose_footer()
+        yield from self.compose_nav(show_prev=True, install=True)
 
     def on_mount(self) -> None:
-        self.focus()
+        # Focus the Install button so Enter triggers it immediately
+        self.query_one("#btn-install", Button).focus()
 
     def action_install(self) -> None:
         self.app.exit(self.app.config)
+
+    def action_prev(self) -> None:
+        self.app.pop_screen()
 
 
 # ─── model select screen ──────────────────────────────────────────────────────
 
 
 class ModelSelectScreen(Screen):
+    """TUI for picking the active model from existing configs."""
+
     BINDINGS = [
-        Binding("escape,q", "app.exit_cancel", "Cancel", show=True),
+        Binding("escape,q", "app.exit_cancel", "Cancel", show=False),
+        Binding("enter", "select", "Select", show=False),
     ]
 
     def __init__(self, models: list[str], active: str, version: str) -> None:
@@ -682,15 +764,21 @@ class ModelSelectScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Static(LOGO, id="logo")
+        with Horizontal(id="step-bar"):
+            yield Static("Select Active Model", classes="step-title")
+            yield Static(f"{len(self._models)} model(s)", classes="step-num")
         with Vertical(id="content"):
             yield Static("Active Model", classes="section-title")
-            yield Static("↑↓ navigate    Enter select    Esc cancel", classes="hint")
+            yield Static("↑↓ navigate    Enter / Select button to activate", classes="hint")
             ol = OptionList(id="ol")
             for m in self._models:
                 prefix = "● " if m == self._active else "  "
                 ol.add_option(Option(f"{prefix}{m}", id=m))
             yield ol
-        yield Footer()
+        with Horizontal(id="nav"):
+            yield Button("✕ Cancel", id="btn-cancel", classes="-cancel")
+            yield Static("", classes="nav-spacer")
+            yield Button("✓ Select", id="btn-select", classes="-primary")
 
     def on_mount(self) -> None:
         ol = self.query_one("#ol", OptionList)
@@ -700,8 +788,105 @@ class ModelSelectScreen(Screen):
         elif self._models:
             ol.highlighted = 0
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-cancel":
+            self.app.exit(None)
+        elif event.button.id == "btn-select":
+            self.action_select()
+
+    def action_select(self) -> None:
+        ol = self.query_one("#ol", OptionList)
+        if ol.highlighted is not None and ol.highlighted < len(self._models):
+            self.app.exit({"selected": self._models[ol.highlighted]})
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.app.exit({"selected": event.option_id})
+
+
+# ─── model management screen ──────────────────────────────────────────────────
+
+
+class ModelManagementScreen(Screen):
+    """Full TUI for model management: list / add / switch / show / edit."""
+
+    BINDINGS = [
+        Binding("escape,q", "app.exit_cancel", "Exit", show=False),
+    ]
+
+    def __init__(self, models: list[str], active: str, version: str) -> None:
+        super().__init__()
+        self._models = models
+        self._active = active
+        self._version = version
+
+    def compose(self) -> ComposeResult:
+        yield Static(LOGO, id="logo")
+        with Horizontal(id="step-bar"):
+            yield Static("Model Management", classes="step-title")
+            yield Static(f"{len(self._models)} model(s)", classes="step-num")
+        with Vertical(id="content"):
+            yield Static("Model configs", classes="section-title")
+            yield Static(
+                "↑↓ navigate    Enter / action button to manage",
+                classes="hint",
+            )
+            ol = OptionList(id="ol")
+            if self._models:
+                for m in self._models:
+                    prefix = "● " if m == self._active else "  "
+                    ol.add_option(Option(f"{prefix}{m}", id=m))
+            else:
+                ol.add_option(Option("  (no models — use Add to create one)", id="__none__"))
+            yield ol
+            yield Static("Add a new model (org/name):", classes="field-label")
+            yield Input(placeholder="e.g. Qwen/Qwen3-VL-32B-Instruct", id="inp-add")
+        with Horizontal(id="nav"):
+            yield Button("✕ Exit", id="btn-exit", classes="-cancel")
+            yield Static("", classes="nav-spacer")
+            yield Button("+ Add", id="btn-add")
+            yield Button("⇄ Switch", id="btn-switch", classes="-primary")
+            yield Button("⊞ Show", id="btn-show")
+            yield Button("✎ Edit", id="btn-edit")
+
+    def on_mount(self) -> None:
+        ol = self.query_one("#ol", OptionList)
+        ol.focus()
+        if self._active in self._models:
+            ol.highlighted = self._models.index(self._active)
+        elif self._models:
+            ol.highlighted = 0
+
+    def _selected_model(self) -> str | None:
+        ol = self.query_one("#ol", OptionList)
+        if ol.highlighted is None:
+            return None
+        idx = ol.highlighted
+        if 0 <= idx < len(self._models):
+            return self._models[idx]
+        return None
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id
+        if bid == "btn-exit":
+            self.app.exit(None)
+        elif bid == "btn-add":
+            val = self.query_one("#inp-add", Input).value.strip()
+            if val:
+                self.app.exit({"action": "add", "model": val})
+            else:
+                self.query_one("#inp-add", Input).focus()
+        elif bid == "btn-switch":
+            m = self._selected_model()
+            if m:
+                self.app.exit({"action": "switch", "model": m})
+        elif bid == "btn-show":
+            m = self._selected_model()
+            if m:
+                self.app.exit({"action": "show", "model": m})
+        elif bid == "btn-edit":
+            m = self._selected_model()
+            if m:
+                self.app.exit({"action": "edit", "model": m})
 
 
 # ─── apps ─────────────────────────────────────────────────────────────────────
@@ -801,12 +986,34 @@ class ModelSelectApp(App[dict | None]):
         self.exit(None)
 
 
+class ModelManagementApp(App[dict | None]):
+    CSS = APP_CSS
+
+    def __init__(self, models: list[str], active: str, version: str) -> None:
+        super().__init__()
+        self._models = models
+        self._active = active
+        self._version = version
+
+    def on_mount(self) -> None:
+        self.push_screen(
+            ModelManagementScreen(self._models, self._active, self._version)
+        )
+
+    def action_exit_cancel(self) -> None:
+        self.exit(None)
+
+
 # ─── entry point ──────────────────────────────────────────────────────────────
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="thorllm TUI wizard")
-    parser.add_argument("--mode", choices=["wizard", "model-select"], default="wizard")
+    parser.add_argument(
+        "--mode",
+        choices=["wizard", "model-select", "model-manage"],
+        default="wizard",
+    )
     parser.add_argument("--defaults", default="{}")
     parser.add_argument("--version", default="0.1.0")
     parser.add_argument("--models", default="[]")
@@ -839,9 +1046,12 @@ def main() -> None:
             torch_latest=torch_latest,
             torch_versions=torch_versions,
         ).run()
-    else:
+    elif args.mode == "model-select":
         models = json.loads(args.models)
         result = ModelSelectApp(models, args.active, version).run()
+    else:  # model-manage
+        models = json.loads(args.models)
+        result = ModelManagementApp(models, args.active, version).run()
 
     if result is None:
         sys.exit(1)

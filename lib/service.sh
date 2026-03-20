@@ -9,60 +9,6 @@ _health_check() {
     curl -sf "http://localhost:${port}/v1/health" &>/dev/null
 }
 
-# ── Follow logs until vLLM is healthy, then exit with summary ─────────────────
-_follow_until_ready() {
-    local port="${VLLM_PORT:-8000}"
-    local timeout=300   # 5 min max wait
-    local elapsed=0
-    local interval=3
-    local frames=('⠋' '⠙' '⠸' '⠴' '⠦' '⠇')
-    local fi=0
-
-    echo ""
-    step "Following vLLM startup logs  (Ctrl-C to detach)"
-    echo -e "  Waiting for http://localhost:${port}/v1/health …"
-    echo ""
-
-    # Stream logs in background
-    journalctl -u "${SERVICE_NAME}" -f --no-pager -n 30 &
-    local log_pid=$!
-
-    # Poll health endpoint
-    while (( elapsed < timeout )); do
-        if _health_check; then
-            # Give log stream a moment to flush last lines
-            sleep 1
-            kill "${log_pid}" 2>/dev/null
-            wait "${log_pid}" 2>/dev/null
-
-            echo ""
-            step "vLLM is ready"
-            echo ""
-            printf "  %-18s %s\n" "Status:"       "● Running"
-            printf "  %-18s %s\n" "API endpoint:" "http://localhost:${port}/v1"
-            printf "  %-18s %s\n" "Health:"       "http://localhost:${port}/v1/health"
-            printf "  %-18s %s\n" "Active model:" "${SERVE_MODEL}"
-            echo ""
-            echo -e "  Useful commands:"
-            printf "  %-28s %s\n" "thorllm logs -f"     "stream live logs"
-            printf "  %-28s %s\n" "thorllm status"      "service status"
-            printf "  %-28s %s\n" "thorllm stop"        "stop the service"
-            printf "  %-28s %s\n" "thorllm kill"        "force-kill vLLM process"
-            echo ""
-            return 0
-        fi
-
-        printf "\r${frames[$((fi % 6))]}  Waiting for vLLM … %ds elapsed" "${elapsed}"
-        (( fi++ )); sleep "${interval}"; (( elapsed += interval ))
-    done
-
-    # Timeout — kill log stream, warn
-    kill "${log_pid}" 2>/dev/null; wait "${log_pid}" 2>/dev/null
-    echo ""
-    warn "vLLM did not become healthy within ${timeout}s."
-    warn "Check logs: thorllm logs -f"
-}
-
 # ── EnvironmentFile ───────────────────────────────────────────────────────────
 write_env_file() {
     local env_file="${BUILD_PATH}/vllm.env"

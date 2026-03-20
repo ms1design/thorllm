@@ -20,6 +20,9 @@ patches:
     applies_to:
       ">=0.8.0,<99.0.0": true
 
+  # patch_layernorm is temporarily disabled — does not work reliably.
+  # Symptom: RMSNormGated missing 'activation' attribute in vLLM < 0.16.0.
+  # Re-enable once root cause confirmed on target vLLM version.
   patch_layernorm:
     description: "RMSNormGated missing activation attribute fix"
     notes: >

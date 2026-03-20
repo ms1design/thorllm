@@ -1,20 +1,45 @@
 #!/bin/bash
-# tui/wizard.sh — interactive setup wizard bridge
-# Launches the Python Textual TUI (tui/wizard.py) and reads back JSON config.
-# Falls back to basic interactive prompts if Python/Textual is not available.
-# Note: wizard.py contains the actual TUI implementation; this is just the launcher.
+# tui/wizard.sh — shell bridge for the Python Textual TUI
+#
+# RELATIONSHIP BETWEEN wizard.sh AND wizard.py
+# ─────────────────────────────────────────────
+# wizard.py  — The actual TUI implementation.  Written in Python using the
+#              Textual framework.  It renders all screens, handles user input,
+#              and writes a JSON result file on completion.  Never run directly
+#              from the shell in normal use; always invoked by wizard.sh.
+#
+# wizard.sh  — This file.  A pure-bash launcher / bridge that:
+#                • checks whether Python + Textual are available,
+#                • serialises current shell variables → JSON for wizard.py,
+#                • calls wizard.py --output <tmpfile>,
+#                • reads the JSON result back into shell variables,
+#                • falls back to plain readline prompts when Textual is absent.
+#
+# There is NO code duplication: the two files have entirely different roles.
+# wizard.sh knows about bash variables and system state; wizard.py knows about
+# rendering a full-screen TUI.  Neither can replace the other.
 # =============================================================================
 
 _TUI_PY="${SELF_DIR}/tui/wizard.py"
 
 # ── Check Textual availability ────────────────────────────────────────────────
 _has_textual() {
-    python3 -c "import textual" 2>/dev/null
+    # Check system python3 first, then the vLLM venv (Textual may be there)
+    if "${THORLLM_PYTHON:-python3}" -c "import textual" 2>/dev/null; then
+        return 0
+    fi
+    local venv_py="${VENV_PATH:-${BUILD_PATH:-${HOME}/thorllm}/.vllm}/bin/python"
+    if [[ -x "${venv_py}" ]] && "${venv_py}" -c "import textual" 2>/dev/null; then
+        # Export so sub-invocations use the right interpreter
+        export THORLLM_PYTHON="${venv_py}"
+        return 0
+    fi
+    return 1
 }
 
 # ── Collect current config as JSON for the TUI ────────────────────────────────
 _build_defaults_json() {
-    python3 -c "
+    "${THORLLM_PYTHON:-python3}" -c "
 import json, sys
 d = {
     'BUILD_PATH':    '${BUILD_PATH}',
@@ -33,13 +58,13 @@ _apply_config_json() {
     local json_file="$1"
     [[ -f "${json_file}" ]] || return 1
 
-    BUILD_PATH=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('BUILD_PATH','${BUILD_PATH}'))")
-    CACHE_ROOT=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('CACHE_ROOT','${CACHE_ROOT}'))")
-    VLLM_VERSION=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('VLLM_VERSION',''))")
-    TORCH_VERSION=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('TORCH_VERSION','${TORCH_VERSION}'))")
-    SERVE_MODEL=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('SERVE_MODEL','${SERVE_MODEL}'))")
-    SERVICE_USER=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('SERVICE_USER','${SERVICE_USER}'))")
-    HF_TOKEN=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('HF_TOKEN',''))")
+    BUILD_PATH=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('BUILD_PATH','${BUILD_PATH}'))")
+    CACHE_ROOT=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('CACHE_ROOT','${CACHE_ROOT}'))")
+    VLLM_VERSION=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('VLLM_VERSION',''))")
+    TORCH_VERSION=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('TORCH_VERSION','${TORCH_VERSION}'))")
+    SERVE_MODEL=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('SERVE_MODEL','${SERVE_MODEL}'))")
+    SERVICE_USER=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('SERVICE_USER','${SERVICE_USER}'))")
+    HF_TOKEN=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('HF_TOKEN',''))")
     export VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
     export MODELS_DIR="${BUILD_PATH}/models"
 }
@@ -90,7 +115,7 @@ run_wizard() {
 
         # Pass --output so the TUI writes JSON to a file; stdout/stderr stay
         # connected to the terminal so Textual can render its UI normally.
-        if python3 "${_TUI_PY}" \
+        if "${THORLLM_PYTHON:-python3}" "${_TUI_PY}" \
                 --mode wizard \
                 --defaults "${defaults_json}" \
                 --version "${VERSION}" \
@@ -160,19 +185,19 @@ _model_select_interactive() {
     fi
 
     local models_json
-    models_json=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1:]))" "${models[@]}")
+    models_json=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; print(json.dumps(sys.argv[1:]))" "${models[@]}")
     local tmp_out
     tmp_out=$(mktemp /tmp/thorllm-model-XXXXXX.json)
 
     # --output keeps stdout/stderr free for Textual to render the TUI.
-    if python3 "${_TUI_PY}" \
+    if "${THORLLM_PYTHON:-python3}" "${_TUI_PY}" \
             --mode model-select \
             --models "${models_json}" \
             --active "${active}" \
             --version "${VERSION}" \
             --output "${tmp_out}"; then
         local selected
-        selected=$(python3 -c "import json; d=json.load(open('${tmp_out}')); print(d.get('selected',''))")
+        selected=$("${THORLLM_PYTHON:-python3}" -c "import json; d=json.load(open('${tmp_out}')); print(d.get('selected',''))")
         rm -f "${tmp_out}"
         if [[ -n "${selected}" ]]; then
             source "${LIB_DIR}/model.sh"
@@ -181,5 +206,57 @@ _model_select_interactive() {
     else
         rm -f "${tmp_out}"
         info "Model selection cancelled."
+    fi
+}
+
+# ── Interactive model management (called by `thorllm model`) ──────────────────
+model_manage_interactive() {
+    local active
+    active=$(grep '^SERVE_MODEL=' "${BUILD_PATH}/vllm.env" 2>/dev/null \
+        | cut -d= -f2 || echo "${SERVE_MODEL}")
+
+    local models=()
+    if [[ -d "${MODELS_DIR}" ]] && [[ -n "$(ls -A "${MODELS_DIR}" 2>/dev/null)" ]]; then
+        while read -r f; do
+            local rel
+            rel=$(realpath --relative-to="${MODELS_DIR}" "${f}" | sed 's/\.yaml$//')
+            models+=("${rel}")
+        done < <(find "${MODELS_DIR}" -name "*.yaml" ! -path "*/example/*" | sort)
+    fi
+
+    if ! _has_textual; then
+        # Fallback: delegate to regular subcommand display
+        source "${LIB_DIR}/model.sh"
+        model_list
+        return
+    fi
+
+    local models_json
+    models_json=$("${THORLLM_PYTHON:-python3}" -c "import json,sys; print(json.dumps(sys.argv[1:]))" "${models[@]}")
+    local tmp_out
+    tmp_out=$(mktemp /tmp/thorllm-model-manage-XXXXXX.json)
+
+    if "${THORLLM_PYTHON:-python3}" "${_TUI_PY}" \
+            --mode model-manage \
+            --models "${models_json}" \
+            --active "${active}" \
+            --version "${VERSION}" \
+            --output "${tmp_out}"; then
+        local action model_arg
+        action=$("${THORLLM_PYTHON:-python3}" -c "import json; d=json.load(open('${tmp_out}')); print(d.get('action',''))")
+        model_arg=$("${THORLLM_PYTHON:-python3}" -c "import json; d=json.load(open('${tmp_out}')); print(d.get('model','') or d.get('selected',''))")
+        rm -f "${tmp_out}"
+        if [[ -n "${action}" && -n "${model_arg}" ]]; then
+            source "${LIB_DIR}/model.sh"
+            case "${action}" in
+                add)    model_add    "${model_arg}" ;;
+                switch) model_switch "${model_arg}" ;;
+                show)   model_show   "${model_arg}" ;;
+                edit)   model_edit   "${model_arg}" ;;
+            esac
+        fi
+    else
+        rm -f "${tmp_out}"
+        info "Model management closed."
     fi
 }

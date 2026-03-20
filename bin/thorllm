@@ -102,7 +102,6 @@ while [[ $# -gt 0 ]]; do
         --no-color)     NO_COLOR=1; shift ;;
         --build-path)   BUILD_PATH="$2"; shift 2 ;;
         --update)       UPDATE=1; shift ;;
-        -f)             FOLLOW_LOGS=1; shift ;;
         -p|--port)
             export VLLM_PORT="$2"; shift 2 ;;
         setup)          CMD=setup; shift ;;
@@ -112,12 +111,21 @@ while [[ $# -gt 0 ]]; do
         restart)        CMD=restart; shift ;;
         status)         CMD=status; shift ;;
         kill)           CMD=kill; shift ;;
-        logs)           CMD=logs; shift ;;
+        logs)
+            CMD=logs
+            shift
+            # -f is a logs-only flag (not global)
+            [[ "${1:-}" == "-f" ]] && { FOLLOW_LOGS=1; shift; } || true
+            ;;
         model)
             CMD=model
             SUBCMD="${2:-}"
             MODEL_ARG="${3:-}"
             shift; [[ $# -gt 0 ]] && shift || true
+            # Treat -h / --help as a request for model help, not a subcommand
+            if [[ "${SUBCMD}" == "-h" || "${SUBCMD}" == "--help" ]]; then
+                SUBCMD=""
+            fi
             [[ $# -gt 0 && ! "$1" =~ ^- ]] && { MODEL_ARG="$1"; shift; } || true
             ;;
         version)        CMD=version; shift ;;
@@ -173,17 +181,9 @@ case "${CMD:-}" in
                 if [[ -n "${SUBCMD:-}" ]]; then
                     die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch select show edit"
                 fi
-                # No subcommand — show model usage
-                echo ""
-                echo "Usage: thorllm model <subcommand> [arg]"
-                echo ""
-                echo "  list               List available model configs"
-                echo "  add <org/name>     Create a new model config"
-                echo "  switch <org/name>  Switch the active model"
-                echo "  select             Interactive model selection (TUI)"
-                echo "  show <org/name>    Print model config YAML"
-                echo "  edit <org/name>    Open model config in \$EDITOR"
-                echo ""
+                # No subcommand — open TUI model manager
+                source "${SELF_DIR}/tui/wizard.sh"
+                model_manage_interactive
                 ;;
         esac
         ;;
