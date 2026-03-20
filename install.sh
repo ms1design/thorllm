@@ -62,9 +62,10 @@ echo ""
 # ── Clone or update repo ──────────────────────────────────────────────────────
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     _i "Updating existing install..."
-    git -C "${INSTALL_DIR}" fetch --quiet origin
+    git -C "${INSTALL_DIR}" fetch --quiet --all
     git -C "${INSTALL_DIR}" reset --hard "origin/${BRANCH}" --quiet
-    _ok "Updated to latest ${BRANCH}"
+    git -C "${INSTALL_DIR}" clean -fd --quiet 2>/dev/null || true
+    _ok "Updated to latest ${BRANCH} (all local changes overwritten)"
 elif [[ "${_PIPE_MODE}" == "0" && "$(realpath "${_LOCAL_DIR}")" == "$(realpath "${INSTALL_DIR}" 2>/dev/null || echo __none__)" ]]; then
     # Running from inside INSTALL_DIR itself — nothing to clone
     _i "Running from repo at ${INSTALL_DIR} — skipping clone."

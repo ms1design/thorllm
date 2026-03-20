@@ -100,7 +100,6 @@ config_show() {
     printf "  %-30s%s\n" "CUDSS_VERSION"      "${CUDSS_VERSION}"
     printf "  %-30s%s\n" "HF_TOKEN"           "${HF_TOKEN:+(set)}"
     echo ""
-    print_footer
 }
 
 # ── Export all env vars needed by templates ───────────────────────────────────

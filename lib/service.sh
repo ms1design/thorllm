@@ -49,7 +49,6 @@ _follow_until_ready() {
             printf "  %-28s %s\n" "thorllm stop"        "stop the service"
             printf "  %-28s %s\n" "thorllm kill"        "force-kill vLLM process"
             echo ""
-            print_footer
             return 0
         fi
 
@@ -184,7 +183,6 @@ service_ctl() {
             step "Stopping ${SERVICE_NAME}"
             sudo systemctl stop "${SERVICE_NAME}"
             success "Service stopped."
-            print_footer
             ;;
         restart)
             step "Restarting ${SERVICE_NAME}"
@@ -246,5 +244,4 @@ service_kill() {
     # Drop GPU page cache
     sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
     success "GPU page cache cleared."
-    print_footer
 }

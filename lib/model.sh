@@ -39,7 +39,6 @@ model_list() {
             done
     fi
     echo ""
-    print_footer
 }
 
 model_add() {
