@@ -8,6 +8,7 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.."; pwd)"
 LIB_DIR="${SELF_DIR}/lib"
 TPL_DIR="${SELF_DIR}/templates"
+export SELF_DIR LIB_DIR TPL_DIR
 
 # shellcheck source=lib/common.sh
 source "${LIB_DIR}/common.sh"

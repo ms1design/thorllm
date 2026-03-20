@@ -33,8 +33,12 @@ CUDSS_VERSION="${CUDSS_VERSION:-0.7.1}"
 # Derived paths (computed, not stored in config)
 VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
 MODELS_DIR="${BUILD_PATH}/models"
-TPL_DIR="${TPL_DIR:-${HOME}/.local/share/thorllm/templates}"
-THORLLM_LIB="${THORLLM_LIB:-${HOME}/.local/share/thorllm/lib}"
+# TPL_DIR and THORLLM_LIB are resolved relative to the running script (SELF_DIR/LIB_DIR)
+# when available, falling back to the canonical install location.
+_THORLLM_SHARE="${HOME}/.local/share/thorllm"
+TPL_DIR="${TPL_DIR:-${SELF_DIR:+${SELF_DIR}/templates}}"
+TPL_DIR="${TPL_DIR:-${_THORLLM_SHARE}/templates}"
+THORLLM_LIB="${LIB_DIR:-${THORLLM_LIB:-${_THORLLM_SHARE}/lib}}"
 
 # ── Load config from file ─────────────────────────────────────────────────────
 config_load() {

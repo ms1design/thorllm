@@ -87,12 +87,13 @@ run_wizard() {
         defaults_json=$(_build_defaults_json)
         tmp_out=$(mktemp /tmp/thorllm-config-XXXXXX.json)
 
-        # Run the Textual TUI; it prints JSON on success, exits 1 on cancel
+        # Pass --output so the TUI writes JSON to a file; stdout/stderr stay
+        # connected to the terminal so Textual can render its UI normally.
         if python3 "${_TUI_PY}" \
                 --mode wizard \
                 --defaults "${defaults_json}" \
                 --version "${VERSION}" \
-                > "${tmp_out}" 2>/dev/null; then
+                --output "${tmp_out}"; then
             _apply_config_json "${tmp_out}"
             rm -f "${tmp_out}"
         else
@@ -162,12 +163,13 @@ _model_select_interactive() {
     local tmp_out
     tmp_out=$(mktemp /tmp/thorllm-model-XXXXXX.json)
 
+    # --output keeps stdout/stderr free for Textual to render the TUI.
     if python3 "${_TUI_PY}" \
             --mode model-select \
             --models "${models_json}" \
             --active "${active}" \
             --version "${VERSION}" \
-            > "${tmp_out}" 2>/dev/null; then
+            --output "${tmp_out}"; then
         local selected
         selected=$(python3 -c "import json; d=json.load(open('${tmp_out}')); print(d.get('selected',''))")
         rm -f "${tmp_out}"

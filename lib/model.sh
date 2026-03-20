@@ -3,9 +3,12 @@
 # Sources: common.sh, config.sh, service.sh
 # =============================================================================
 
-[[ -f "${THORLLM_LIB}/common.sh" ]] && source "${THORLLM_LIB}/common.sh"
-source "${THORLLM_LIB}/config.sh"
-source "${THORLLM_LIB}/service.sh"
+# LIB_DIR is exported by bin/thorllm before this file is sourced.
+# THORLLM_LIB is kept as a legacy alias pointing to the same place.
+LIB_DIR="${LIB_DIR:-${THORLLM_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
+[[ -f "${LIB_DIR}/common.sh" ]] && source "${LIB_DIR}/common.sh"
+source "${LIB_DIR}/config.sh"
+source "${LIB_DIR}/service.sh"
 
 _model_yaml_path() {
     local model="$1"
