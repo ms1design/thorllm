@@ -14,12 +14,11 @@ source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/config.sh"
 
 # ── Load VERSION file (auto) or env (manual override) ────────────────────────
-if [[ -n "${THORLLM_VERSION:-}" ]]; then
-    VERSION="${THORLLM_VERSION}"
-elif [[ -f "${SELF_DIR}/VERSION" ]]; then
-    VERSION=$(cat "${SELF_DIR}/VERSION")
-else
-    VERSION="0.0.0"
+VERSION=$(cat "${SELF_DIR}/VERSION")
+
+VENV_PATH="${VENV_PATH:-${BUILD_PATH:-~/vllm-thor}/.venv}"
+if [[ -x "${VENV_PATH}/bin/python" ]]; then
+    VLLM_VERSION=$("${VENV_PATH}/bin/python" -c "import importlib.metadata as m; print(m.version('vllm'))" 2>/dev/null || echo "")
 fi
 
 usage() {
