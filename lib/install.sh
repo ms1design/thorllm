@@ -258,16 +258,11 @@ create_cache_dirs() {
 }
 
 # ── NVFP4 patches — registry-driven ─────────────────────────────────────────
-#
-# Each patch script is self-guarding: it detects the installed vLLM version
-# at runtime and skips itself when the fix is already in upstream code.
-# The registry (patches/registry.yaml) documents which ranges each patch
-# targets, but the Python scripts are the authoritative gate.
-# ──────────────────────────────────────────────────────────────────────────────
-apply_nvfp4_patches() {
+apply_vllm_patches() {
     step "NVFP4 patches"
 
     local patch_dir="${LIB_DIR}/../patches"
+    local registry_file="${patch_dir}/registry.yaml"
     local venv_python="${VENV_PATH}/bin/python"
 
     if [[ ! -d "${patch_dir}" ]]; then
@@ -276,8 +271,11 @@ apply_nvfp4_patches() {
         return
     fi
 
-    # Resolve the installed vLLM version once (used for logging only;
-    # each patch script does its own version check internally).
+    if [[ ! -f "${registry_file}" ]]; then
+        warn "Registry file not found: ${registry_file} — skipping patch application."
+        return
+    fi
+
     local vllm_ver
     vllm_ver=$(
         "${venv_python}" -c \
@@ -285,30 +283,92 @@ apply_nvfp4_patches() {
             2>/dev/null || echo "unknown"
     )
     info "Installed vLLM: ${vllm_ver}"
-    info "Patch registry: ${patch_dir}/registry.yaml"
+    info "Patch registry: ${registry_file}"
 
-    # ── SM110 patch ──────────────────────────────────────────────────────────
-    if [[ -f "${patch_dir}/patch_sm110.py" ]]; then
-        info "Running patch_sm110 (CUTLASS NVFP4 on Jetson Thor SM110)..."
-        if "${venv_python}" "${patch_dir}/patch_sm110.py"; then
-            success "patch_sm110: complete"
-        else
-            warn "patch_sm110 failed — NVFP4 will fall back to Marlin (slower)."
-        fi
-    else
-        warn "patch_sm110.py not found — skipping."
-    fi
+    local patches_applied=0
+    local patches_skipped=0
 
-    # ── Layernorm patch ──────────────────────────────────────────────────────
-    if [[ -f "${patch_dir}/patch_layernorm.py" ]]; then
-        info "Running patch_layernorm (RMSNormGated activation attribute)..."
-        if "${venv_python}" "${patch_dir}/patch_layernorm.py"; then
-            success "patch_layernorm: complete"
+    while IFS='|' read -r patch_name range_spec patch_file; do
+        [[ -z "${patch_name}" ]] && continue
+        
+        local should_apply=false
+
+        if [[ -n "${range_spec}" ]]; then
+            if "${venv_python}" -c "
+import re
+
+vllm_ver = '${vllm_ver}'
+range_spec = '${range_spec}'
+
+def version_tuple(v):
+    return tuple(map(int, v.split('.')))
+
+min_ver = None
+max_ver = None
+
+matches = re.findall(r'>=([0-9]+\.[0-9]+\.[0-9]+)', range_spec)
+if matches:
+    min_ver = matches[0]
+
+matches = re.findall(r'<([0-9]+\.[0-9]+\.[0-9]+)', range_spec)
+if matches:
+    max_ver = matches[0]
+
+v = version_tuple(vllm_ver)
+
+if min_ver and v < version_tuple(min_ver):
+    exit(1)
+
+if max_ver and v >= version_tuple(max_ver):
+    exit(1)
+
+exit(0)
+"; then
+                should_apply=true
+            else
+                info "  Skipping ${patch_name} (v${vllm_ver} outside range: ${range_spec})"
+                ((patches_skipped++))
+            fi
         else
-            warn "patch_layernorm failed — NVFP4 gated-activation models may error on load."
+            should_apply=true
         fi
+
+        if [[ "${should_apply}" == "true" && -f "${patch_dir}/${patch_file}" ]]; then
+            info "Applying ${patch_name}..."
+            if "${venv_python}" "${patch_dir}/${patch_file}"; then
+                success "${patch_name}: complete"
+                ((patches_applied++))
+            else
+                warn "${patch_name} failed"
+                ((patches_skipped++))
+            fi
+        elif [[ "${should_apply}" == "true" && ! -f "${patch_dir}/${patch_file}" ]]; then
+            warn "${patch_name}: patch file not found (${patch_file}) — skipping"
+            ((patches_skipped++))
+        fi
+    done < <(
+        "${venv_python}" -c "
+import yaml
+
+registry_file = '${registry_file}'
+with open(registry_file, 'r') as f:
+    data = yaml.safe_load(f)
+
+patches = data.get('patches', {})
+for name, info in patches.items():
+    applies_to = info.get('applies_to', {})
+    for range_spec, should_apply in applies_to.items():
+        if should_apply:
+            patch_file = name + '.py'
+            print(f'{name}|{range_spec}|{patch_file}')
+            break
+"
+    )
+
+    if [[ ${patches_applied} -gt 0 || ${patches_skipped} -gt 0 ]]; then
+        info "Patch application summary: ${patches_applied} applied, ${patches_skipped} skipped"
     else
-        warn "patch_layernorm.py not found — skipping."
+        info "No patches to apply from registry"
     fi
 }
 
@@ -364,10 +424,7 @@ run_install() {
     source "${LIB_DIR}/validate.sh"
     run_validate
 
-    # Apply NVFP4 patches if enabled (default: yes)
-    if [[ "${NVFP4_ENABLE:-1}" == "1" ]]; then
-        apply_nvfp4_patches
-    fi
+    apply_vllm_patches
 
     prefetch_tiktoken
 

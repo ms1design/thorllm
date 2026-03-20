@@ -2,6 +2,7 @@
 # tui/wizard.sh — interactive setup wizard bridge
 # Launches the Python Textual TUI (tui/wizard.py) and reads back JSON config.
 # Falls back to basic interactive prompts if Python/Textual is not available.
+# Note: wizard.py contains the actual TUI implementation; this is just the launcher.
 # =============================================================================
 
 _TUI_PY="${SELF_DIR}/tui/wizard.py"

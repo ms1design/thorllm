@@ -177,7 +177,10 @@ service_ctl() {
             echo ""
             echo -e "[sudo] Starting systemd service requires elevated privileges."
             sudo systemctl start "${SERVICE_NAME}"
-            _follow_until_ready
+            echo ""
+            success "vLLM service started."
+            echo "  Check status: thorllm status"
+            echo "  View logs:    thorllm logs -f"
             ;;
         stop)
             step "Stopping ${SERVICE_NAME}"
@@ -188,7 +191,10 @@ service_ctl() {
             step "Restarting ${SERVICE_NAME}"
             sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
             sudo systemctl restart "${SERVICE_NAME}"
-            _follow_until_ready
+            echo ""
+            success "vLLM service restarted."
+            echo "  Check status: thorllm status"
+            echo "  View logs:    thorllm logs -f"
             ;;
         status)
             sudo systemctl status "${SERVICE_NAME}" --no-pager -l

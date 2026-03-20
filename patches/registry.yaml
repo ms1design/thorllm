@@ -20,13 +20,13 @@ patches:
     applies_to:
       ">=0.8.0,<99.0.0": true
 
-  # patch_layernorm:
-  #   description: "RMSNormGated missing activation attribute fix"
-  #   notes: >
-  #     In vLLM <0.16.0, RMSNormGated.__init__ does not accept or store the
-  #     'activation' parameter, causing AttributeError when loading NVFP4 gated
-  #     models. From 0.16.0 onwards the attribute is already present upstream
-  #     and this patch must NOT be applied (would cause duplicate-argument error).
-  #   applies_to:
-  #     ">=0.8.0,<0.16.0": true
-  #     ">=0.16.0":         false
+  patch_layernorm:
+    description: "RMSNormGated missing activation attribute fix"
+    notes: >
+      In vLLM <0.16.0, RMSNormGated.__init__ does not accept or store the
+      'activation' parameter, causing AttributeError when loading NVFP4 gated
+      models. From 0.16.0 onwards the attribute is already present upstream
+      and this patch must NOT be applied (would cause duplicate-argument error).
+    applies_to:
+      ">=0.8.0,<0.16.0": true
+      ">=0.16.0":         false

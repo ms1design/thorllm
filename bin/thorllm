@@ -40,7 +40,7 @@ Install:
   install --update       Update vLLM to latest version
 
 Service:
-  start [-p PORT]        Start the vLLM service (follows logs until ready)
+  start [-p PORT]        Start the vLLM service
   start --port PORT      Start on a custom port (default: 8000)
   stop                   Stop the vLLM service
   restart [-p PORT]      Restart the vLLM service

@@ -9,6 +9,8 @@ Design principles (per Textual docs):
   - @work(thread=True, exclusive=True) for background tasks (HF search, version fetch)
   - app.call_from_thread() to update UI from threads
   - Result dict written to --output file (never stdout) so terminal stays free
+
+Note: This is the TUI implementation. Use tui/wizard.sh to launch it with fallback support.
 """
 
 from __future__ import annotations
@@ -27,7 +29,13 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import (
-    Button, Footer, Input, Label, LoadingIndicator, OptionList, Static,
+    Button,
+    Footer,
+    Input,
+    Label,
+    LoadingIndicator,
+    OptionList,
+    Static,
 )
 from textual.widgets.option_list import Option
 
@@ -173,6 +181,7 @@ Footer > .footer--description {
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _get(url: str, timeout: int = 6) -> Any:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "thorllm/1.0"})
@@ -188,7 +197,8 @@ def fetch_vllm_versions() -> tuple[str, list[str]]:
     data = _get("https://api.github.com/repos/vllm-project/vllm/releases?per_page=20")
     if data and isinstance(data, list):
         stable = [
-            r["tag_name"].lstrip("v") for r in data
+            r["tag_name"].lstrip("v")
+            for r in data
             if not r.get("prerelease") and not r.get("draft") and r.get("tag_name")
         ]
         if stable:
@@ -198,9 +208,12 @@ def fetch_vllm_versions() -> tuple[str, list[str]]:
     tags = _get("https://api.github.com/repos/vllm-project/vllm/tags?per_page=20")
     if tags and isinstance(tags, list):
         versions = [
-            t["name"].lstrip("v") for t in tags
+            t["name"].lstrip("v")
+            for t in tags
             if t.get("name", "").startswith("v")
-            and all(x not in t["name"] for x in ("rc", "dev", "a", "b", "alpha", "beta"))
+            and all(
+                x not in t["name"] for x in ("rc", "dev", "a", "b", "alpha", "beta")
+            )
         ]
         if versions:
             return versions[0], versions[:8]
@@ -209,10 +222,16 @@ def fetch_vllm_versions() -> tuple[str, list[str]]:
     pypi = _get("https://pypi.org/pypi/vllm/json")
     if pypi:
         from packaging.version import Version
+
         all_v = pypi.get("releases", {}).keys()
         stable = sorted(
-            [v for v in all_v if all(x not in v for x in ("rc","dev","a","b","post"))],
-            key=Version, reverse=True
+            [
+                v
+                for v in all_v
+                if all(x not in v for x in ("rc", "dev", "a", "b", "post"))
+            ],
+            key=Version,
+            reverse=True,
         )
         if stable:
             return stable[0], stable[:8]
@@ -227,15 +246,25 @@ def fetch_torch_versions() -> tuple[str, list[str]]:
         return "2.10.0", ["2.10.0", "2.9.1", "2.8.0"]
     try:
         from packaging.version import Version
+
         all_v = data.get("releases", {}).keys()
         stable = sorted(
-            [v for v in all_v if all(x not in v for x in ("rc","dev","a","b","post"))],
-            key=Version, reverse=True
+            [
+                v
+                for v in all_v
+                if all(x not in v for x in ("rc", "dev", "a", "b", "post"))
+            ],
+            key=Version,
+            reverse=True,
         )
         return (stable[0] if stable else "2.10.0"), stable[:8]
     except Exception:
         releases = sorted(data.get("releases", {}).keys(), reverse=True)
-        stable = [v for v in releases if all(x not in v for x in ("rc","dev","a","b","post"))][:8]
+        stable = [
+            v
+            for v in releases
+            if all(x not in v for x in ("rc", "dev", "a", "b", "post"))
+        ][:8]
         return (stable[0] if stable else "2.10.0"), stable
 
 
@@ -259,8 +288,10 @@ import urllib.parse
 
 # ─── base screen ──────────────────────────────────────────────────────────────
 
+
 class WizardScreen(Screen):
     """Base class: logo, step bar, content area, footer."""
+
     STEP = ""
     STEP_NUM = ""
 
@@ -273,15 +304,24 @@ class WizardScreen(Screen):
     def compose_footer(self) -> ComposeResult:
         yield Footer()
 
+    def action_prev(self) -> None:
+        if hasattr(self.app, "action_prev"):
+            self.app.action_prev()
+
+    def action_next(self) -> None:
+        if hasattr(self.app, "action_next"):
+            self.app.action_next()
+
 
 # ─── screen 1: welcome ────────────────────────────────────────────────────────
+
 
 class WelcomeScreen(WizardScreen):
     STEP = "Welcome"
     STEP_NUM = "1 / 7"
     BINDINGS = [
-        Binding("q", "app.exit_cancel", "Quit", show=True),
-        Binding("enter,n", "next", "Continue →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=True),
+        Binding("enter,n", "next", "Next →", show=True),
     ]
 
     def __init__(self, version: str, build_path: str) -> None:
@@ -292,7 +332,9 @@ class WelcomeScreen(WizardScreen):
     def compose(self) -> ComposeResult:
         yield from self.compose_header()
         with Vertical(id="content"):
-            yield Static("thorllm — vLLM manager for NVIDIA Jetson Thor", classes="section-title")
+            yield Static(
+                "thorllm — vLLM manager for NVIDIA Jetson Thor", classes="section-title"
+            )
             yield Static(
                 "This wizard will guide you through installation setup.\n\n"
                 "You will configure:\n"
@@ -310,17 +352,19 @@ class WelcomeScreen(WizardScreen):
         self.focus()
 
     def action_next(self) -> None:
-        self.app.push_screen(self.app._ws[1])
+        self.app.action_next()
 
 
 # ─── screen 2: paths ──────────────────────────────────────────────────────────
+
 
 class PathsScreen(WizardScreen):
     STEP = "Installation Paths"
     STEP_NUM = "2 / 7"
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back", show=True),
-        Binding("ctrl+n", "next", "Next →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=True),
+        Binding("enter,n", "next", "Next →", show=True),
+        Binding("escape,b", "prev", "Prev ←", show=True),
     ]
 
     def __init__(self, build_path: str, cache_root: str) -> None:
@@ -335,9 +379,14 @@ class PathsScreen(WizardScreen):
             yield Static("All vLLM files, venv, and configs.", classes="hint")
             yield Input(value=self._bp, id="inp-build", placeholder="~/thorllm")
             yield Static("Cache root  (CACHE_ROOT)", classes="field-label")
-            yield Static("Triton / FlashInfer / HuggingFace caches. Use fastest storage (NVMe).", classes="hint")
+            yield Static(
+                "Triton / FlashInfer / HuggingFace caches. Use fastest storage (NVMe).",
+                classes="hint",
+            )
             yield Input(value=self._cr, id="inp-cache", placeholder="~/.cache/vllm")
-            yield Static("Tab  focus next field    Ctrl+N  continue    Esc  back", classes="hint")
+            yield Static(
+                "Tab  focus next field    Ctrl+N  continue    Esc  back", classes="hint"
+            )
         yield from self.compose_footer()
 
     def on_mount(self) -> None:
@@ -348,15 +397,17 @@ class PathsScreen(WizardScreen):
         cr = self.query_one("#inp-cache", Input).value.strip() or self._cr
         self.app.config["BUILD_PATH"] = bp
         self.app.config["CACHE_ROOT"] = cr
-        self.app.push_screen(self.app._ws[2])
+        self.app.action_next()
 
 
 # ─── screen 3 & 4: version picker ─────────────────────────────────────────────
 
+
 class VersionScreen(WizardScreen):
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back", show=True),
-        Binding("ctrl+n", "next", "Next →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=True),
+        Binding("enter,n", "next", "Next →", show=True),
+        Binding("escape,b", "prev", "Prev ←", show=True),
     ]
 
     def __init__(
@@ -389,7 +440,10 @@ class VersionScreen(WizardScreen):
             yield ol
             yield Static("Or enter a custom version:", classes="field-label")
             yield Input(placeholder="e.g. 0.17.1", id="inp-custom")
-            yield Static("↑↓ navigate    Enter select    Ctrl+N continue    Esc back", classes="hint")
+            yield Static(
+                "↑↓ navigate    Enter select    Ctrl+N continue    Esc back",
+                classes="hint",
+            )
         yield from self.compose_footer()
 
     def on_mount(self) -> None:
@@ -404,7 +458,9 @@ class VersionScreen(WizardScreen):
             # Enter on a list item automatically advances
             self.action_next()
 
-    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+    def on_option_list_option_highlighted(
+        self, event: OptionList.OptionHighlighted
+    ) -> None:
         if event.option_id:
             self._selected = event.option_id
             self.query_one("#inp-custom", Input).value = ""
@@ -413,17 +469,19 @@ class VersionScreen(WizardScreen):
         custom = self.query_one("#inp-custom", Input).value.strip()
         chosen = custom if custom else self._selected
         self.app.config[self._config_key] = "" if chosen == "latest" else chosen
-        self.app.push_screen(self.app._ws[self._next_idx])
+        self.app.action_next()
 
 
 # ─── screen 5: model (with live HF search) ────────────────────────────────────
+
 
 class ModelScreen(WizardScreen):
     STEP = "Default Model"
     STEP_NUM = "5 / 7"
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back", show=True),
-        Binding("ctrl+n", "next", "Next →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=True),
+        Binding("enter,n", "next", "Next →", show=True),
+        Binding("escape,b", "prev", "Prev ←", show=True),
     ]
 
     def __init__(self, serve_model: str) -> None:
@@ -434,9 +492,16 @@ class ModelScreen(WizardScreen):
         yield from self.compose_header()
         with Vertical(id="content"):
             yield Static("Model to serve  (SERVE_MODEL)", classes="field-label")
-            yield Static("Format: org/model-name    e.g. openai/gpt-oss-120b", classes="hint")
-            yield Input(value=self._model, id="inp-model", placeholder="openai/gpt-oss-120b")
-            yield Static("Live HuggingFace search  (type to search public models):", classes="field-label")
+            yield Static(
+                "Format: org/model-name    e.g. openai/gpt-oss-120b", classes="hint"
+            )
+            yield Input(
+                value=self._model, id="inp-model", placeholder="openai/gpt-oss-120b"
+            )
+            yield Static(
+                "Live HuggingFace search  (type to search public models):",
+                classes="field-label",
+            )
             yield Input(placeholder="Search models…", id="inp-search")
             yield LoadingIndicator(id="spinner")
             yield OptionList(id="search-results")
@@ -480,17 +545,19 @@ class ModelScreen(WizardScreen):
     def action_next(self) -> None:
         val = self.query_one("#inp-model", Input).value.strip() or self._model
         self.app.config["SERVE_MODEL"] = val
-        self.app.push_screen(self.app._ws[5])
+        self.app.action_next()
 
 
 # ─── screen 6: HF token ───────────────────────────────────────────────────────
+
 
 class HFTokenScreen(WizardScreen):
     STEP = "HuggingFace Token"
     STEP_NUM = "6 / 7"
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back", show=True),
-        Binding("ctrl+n", "next", "Next →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=True),
+        Binding("enter,n", "next", "Next →", show=True),
+        Binding("escape,b", "prev", "Prev ←", show=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -511,17 +578,19 @@ class HFTokenScreen(WizardScreen):
 
     def action_next(self) -> None:
         self.app.config["HF_TOKEN"] = self.query_one("#inp-token", Input).value.strip()
-        self.app.push_screen(self.app._ws[6])
+        self.app.action_next()
 
 
 # ─── screen 7: service user ───────────────────────────────────────────────────
+
 
 class ServiceUserScreen(WizardScreen):
     STEP = "Service User"
     STEP_NUM = "7 / 7"
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back", show=True),
-        Binding("ctrl+n", "summary", "Review →", show=True),
+        Binding("q", "app.exit_cancel", "Cancel", show=True),
+        Binding("enter,i", "summary", "Install ✓", show=True),
+        Binding("escape,b", "prev", "Prev ←", show=True),
     ]
 
     def __init__(self, service_user: str) -> None:
@@ -550,10 +619,11 @@ class ServiceUserScreen(WizardScreen):
     def action_summary(self) -> None:
         val = self.query_one("#inp-user", Input).value.strip() or self._user
         self.app.config["SERVICE_USER"] = val
-        self.app.push_screen(SummaryScreen())
+        self.app.action_summary()
 
 
 # ─── summary screen ───────────────────────────────────────────────────────────
+
 
 class SummaryScreen(WizardScreen):
     STEP = "Review & Install"
@@ -567,22 +637,26 @@ class SummaryScreen(WizardScreen):
     def compose(self) -> ComposeResult:
         cfg = self.app.config
         rows = [
-            ("BUILD_PATH",    cfg.get("BUILD_PATH", "")),
-            ("CACHE_ROOT",    cfg.get("CACHE_ROOT", "")),
-            ("VLLM_VERSION",  cfg.get("VLLM_VERSION") or "latest"),
+            ("BUILD_PATH", cfg.get("BUILD_PATH", "")),
+            ("CACHE_ROOT", cfg.get("CACHE_ROOT", "")),
+            ("VLLM_VERSION", cfg.get("VLLM_VERSION") or "latest"),
             ("TORCH_VERSION", cfg.get("TORCH_VERSION") or "latest"),
-            ("SERVE_MODEL",   cfg.get("SERVE_MODEL", "")),
-            ("SERVICE_USER",  cfg.get("SERVICE_USER", "")),
-            ("HF_TOKEN",      "(set)" if cfg.get("HF_TOKEN") else "not set"),
+            ("SERVE_MODEL", cfg.get("SERVE_MODEL", "")),
+            ("SERVICE_USER", cfg.get("SERVICE_USER", "")),
+            ("HF_TOKEN", "(set)" if cfg.get("HF_TOKEN") else "not set"),
         ]
         yield from self.compose_header()
         with Vertical(id="content"):
-            yield Static("Confirm your configuration before installation starts.", classes="hint")
+            yield Static(
+                "Confirm your configuration before installation starts.", classes="hint"
+            )
             for key, val in rows:
                 with Horizontal(classes="summary-row"):
                     yield Static(key, classes="summary-key")
                     yield Static(val, classes="summary-val")
-            yield Static("\nPress Enter or I to install, Esc to go back.", classes="hint")
+            yield Static(
+                "\nPress Enter or I to install, Esc to go back.", classes="hint"
+            )
         yield from self.compose_footer()
 
     def on_mount(self) -> None:
@@ -593,6 +667,7 @@ class SummaryScreen(WizardScreen):
 
 
 # ─── model select screen ──────────────────────────────────────────────────────
+
 
 class ModelSelectScreen(Screen):
     BINDINGS = [
@@ -631,6 +706,7 @@ class ModelSelectScreen(Screen):
 
 # ─── apps ─────────────────────────────────────────────────────────────────────
 
+
 class WizardApp(App[dict | None]):
     CSS = APP_CSS
 
@@ -652,17 +728,27 @@ class WizardApp(App[dict | None]):
         cr = d.get("CACHE_ROOT", os.path.expanduser("~/.cache/vllm"))
         su = d.get("SERVICE_USER", os.environ.get("USER", "ubuntu"))
         self._ws = [
-            WelcomeScreen(version, bp),                          # 0
-            PathsScreen(bp, cr),                                  # 1
-            VersionScreen("vLLM Version", "3 / 7",               # 2
-                          "VLLM_VERSION", vllm_latest,
-                          vllm_versions, next_idx=3),
-            VersionScreen("PyTorch Version", "4 / 7",            # 3
-                          "TORCH_VERSION", torch_latest,
-                          torch_versions, next_idx=4),
+            WelcomeScreen(version, bp),  # 0
+            PathsScreen(bp, cr),  # 1
+            VersionScreen(
+                "vLLM Version",
+                "3 / 7",  # 2
+                "VLLM_VERSION",
+                vllm_latest,
+                vllm_versions,
+                next_idx=3,
+            ),
+            VersionScreen(
+                "PyTorch Version",
+                "4 / 7",  # 3
+                "TORCH_VERSION",
+                torch_latest,
+                torch_versions,
+                next_idx=4,
+            ),
             ModelScreen(d.get("SERVE_MODEL", "openai/gpt-oss-120b")),  # 4
-            HFTokenScreen(),                                       # 5
-            ServiceUserScreen(su),                                 # 6
+            HFTokenScreen(),  # 5
+            ServiceUserScreen(su),  # 6
             # SummaryScreen is created on-demand (it reads config at compose time)
         ]
 
@@ -671,6 +757,32 @@ class WizardApp(App[dict | None]):
 
     def action_exit_cancel(self) -> None:
         self.exit(None)
+
+    def action_next(self) -> None:
+        current_screen = self.screen
+        if isinstance(current_screen, WizardScreen):
+            screen_idx = None
+            for i, s in enumerate(self._ws):
+                if s is current_screen:
+                    screen_idx = i
+                    break
+            if screen_idx is not None and screen_idx < len(self._ws) - 1:
+                self.push_screen(self._ws[screen_idx + 1])
+
+    def action_prev(self) -> None:
+        current_screen = self.screen
+        if isinstance(current_screen, WizardScreen):
+            screen_idx = None
+            for i, s in enumerate(self._ws):
+                if s is current_screen:
+                    screen_idx = i
+                    break
+            if screen_idx is not None and screen_idx > 0:
+                self.pop_screen()
+                self.push_screen(self._ws[screen_idx - 1])
+
+    def action_summary(self) -> None:
+        self.push_screen(SummaryScreen())
 
 
 class ModelSelectApp(App[dict | None]):
@@ -691,6 +803,7 @@ class ModelSelectApp(App[dict | None]):
 
 # ─── entry point ──────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="thorllm TUI wizard")
     parser.add_argument("--mode", choices=["wizard", "model-select"], default="wizard")
@@ -698,8 +811,11 @@ def main() -> None:
     parser.add_argument("--version", default="0.1.0")
     parser.add_argument("--models", default="[]")
     parser.add_argument("--active", default="")
-    parser.add_argument("--output", default="",
-                        help="Write result JSON to file (keeps stdout free for TUI)")
+    parser.add_argument(
+        "--output",
+        default="",
+        help="Write result JSON to file (keeps stdout free for TUI)",
+    )
     args = parser.parse_args()
 
     defaults = json.loads(args.defaults)

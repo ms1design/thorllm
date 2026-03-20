@@ -148,6 +148,8 @@ echo "  TAB completion:        active in new shells"
 echo ""
 
 # ── Auto-launch wizard if interactive ────────────────────────────────────────
-if [[ -t 0 && -t 1 && "${AUTO_SETUP:-1}" == "1" ]]; then
-    exec "${BIN_DIR}/thorllm" setup
+if [[ -t 0 && -t 1 ]]; then
+    if [[ "${AUTO_SETUP:-1}" == "1" ]]; then
+        exec "${BIN_DIR}/thorllm" setup
+    fi
 fi
