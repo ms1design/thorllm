@@ -259,7 +259,7 @@ create_cache_dirs() {
 
 # ── NVFP4 patches — registry-driven ─────────────────────────────────────────
 apply_vllm_patches() {
-    step "NVFP4 patches"
+    step "VLLM patches"
 
     local patch_dir="${LIB_DIR}/../patches"
     local registry_file="${patch_dir}/registry.yaml"
