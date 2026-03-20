@@ -76,25 +76,25 @@ patched = original
 # Before: self.norm_before_gate = norm_before_gate
 # After:  self.norm_before_gate = norm_before_gate
 #         self.activation = activation  # ← ADDED
-OLD_BODY = "        self.norm_before_gate = norm_before_gate"
-NEW_BODY = (
-    "        self.norm_before_gate = norm_before_gate\n"
-    "        self.activation = activation  # NVFP4/gated-activation models (patch_layernorm)"
-)
+# OLD_BODY = "        self.norm_before_gate = norm_before_gate"
+# NEW_BODY = (
+#     "        self.norm_before_gate = norm_before_gate\n"
+#     "        self.activation = activation  # NVFP4/gated-activation models (patch_layernorm)"
+# )
 
-if OLD_BODY in patched and NEW_BODY not in patched:
-    patched = patched.replace(OLD_BODY, NEW_BODY, 1)
-    print("  Applied: self.activation stored in __init__ body")
-elif NEW_BODY in patched:
-    print("  ALREADY PATCHED: self.activation in body")
-else:
-    print("  WARNING: Could not find body anchor — check layernorm.py manually")
+# if OLD_BODY in patched and NEW_BODY not in patched:
+#     patched = patched.replace(OLD_BODY, NEW_BODY, 1)
+#     print("  Applied: self.activation stored in __init__ body")
+# elif NEW_BODY in patched:
+#     print("  ALREADY PATCHED: self.activation in body")
+# else:
+#     print("  WARNING: Could not find body anchor — check layernorm.py manually")
 
-if patched != original:
-    (path.parent / (path.name + ".pre_layernorm_patch")).write_text(original)
-    path.write_text(patched)
-    print(f"  PATCHED: {path}")
-else:
-    print("  NO CHANGE")
+# if patched != original:
+#     (path.parent / (path.name + ".pre_layernorm_patch")).write_text(original)
+#     path.write_text(patched)
+#     print(f"  PATCHED: {path}")
+# else:
+#     print("  NO CHANGE")
 
 print("\nLayernorm patch complete.")
