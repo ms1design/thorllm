@@ -48,6 +48,7 @@ from textual.widgets.option_list import Option
 # ─── Logo ─────────────────────────────────────────────────────────────────────
 
 LOGO = """\
+
   ▗ ▌     ▜ ▜    
   ▜▘▛▌▛▌▛▘▐ ▐ ▛▛▌
   ▐▖▌▌▙▌▌ ▐▖▐▖▌▌▌"""
@@ -153,7 +154,7 @@ LoadingIndicator {
 /* Only layout here — button colours are handled by Textual variants */
 #nav {
     dock: bottom;
-    height: 5;
+    height: 6;
     background: #0a1200;
     border-top: solid #2a3d00;
     padding: 1 2;
