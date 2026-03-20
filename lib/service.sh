@@ -3,14 +3,73 @@
 # Sources: common.sh, config.sh
 # =============================================================================
 
+# ── Health check ──────────────────────────────────────────────────────────────
+_health_check() {
+    local port="${VLLM_PORT:-8000}"
+    curl -sf "http://localhost:${port}/v1/health" &>/dev/null
+}
+
+# ── Follow logs until vLLM is healthy, then exit with summary ─────────────────
+_follow_until_ready() {
+    local port="${VLLM_PORT:-8000}"
+    local timeout=300   # 5 min max wait
+    local elapsed=0
+    local interval=3
+    local frames=('⠋' '⠙' '⠸' '⠴' '⠦' '⠇')
+    local fi=0
+
+    echo ""
+    step "Following vLLM startup logs  (Ctrl-C to detach)"
+    echo -e "${MUTED}  Waiting for http://localhost:${port}/v1/health …${NC}"
+    echo ""
+
+    # Stream logs in background
+    journalctl -u "${SERVICE_NAME}" -f --no-pager -n 30 &
+    local log_pid=$!
+
+    # Poll health endpoint
+    while (( elapsed < timeout )); do
+        if _health_check; then
+            # Give log stream a moment to flush last lines
+            sleep 1
+            kill "${log_pid}" 2>/dev/null
+            wait "${log_pid}" 2>/dev/null
+
+            echo ""
+            step "vLLM is ready"
+            echo ""
+            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "Status:"       "● Running"
+            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "API endpoint:" "http://localhost:${port}/v1"
+            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "Health:"       "http://localhost:${port}/v1/health"
+            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "Active model:" "${SERVE_MODEL}"
+            echo ""
+            echo -e "  ${MUTED}Useful commands:${NC}"
+            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm logs -f"     "stream live logs"
+            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm status"      "service status"
+            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm stop"        "stop the service"
+            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm kill"        "force-kill vLLM process"
+            echo ""
+            print_footer
+            return 0
+        fi
+
+        printf "\r${NVIDIA_GREEN}${frames[$((fi % 6))]}${NC}  Waiting for vLLM … %ds elapsed" "${elapsed}"
+        (( fi++ )); sleep "${interval}"; (( elapsed += interval ))
+    done
+
+    # Timeout — kill log stream, warn
+    kill "${log_pid}" 2>/dev/null; wait "${log_pid}" 2>/dev/null
+    echo ""
+    warn "vLLM did not become healthy within ${timeout}s."
+    warn "Check logs: thorllm logs -f"
+}
+
 # ── EnvironmentFile ───────────────────────────────────────────────────────────
 write_env_file() {
     local env_file="${BUILD_PATH}/vllm.env"
     info "Writing EnvironmentFile: ${env_file}"
+    config_export
 
-    config_export   # ensure all vars are set
-
-    # List the variables envsubst should substitute in the template
     local vars
     vars='${CUDA_HOME} ${TORCH_CUDA_ARCH} ${CACHE_ROOT} ${SERVE_MODEL}
           ${VLLM_CACHE_ROOT} ${VLLM_ASSETS_CACHE} ${VLLM_TUNED_CONFIG_FOLDER}
@@ -19,7 +78,6 @@ write_env_file() {
           ${TIKTOKEN_ENCODINGS_BASE} ${TIKTOKEN_RS_CACHE_DIR} ${HF_DOWNLOAD_DIR}'
 
     render_template "${TPL_DIR}/vllm.env" "${env_file}" "${vars}"
-
     chmod 600 "${env_file}"
     chown "${SERVICE_USER}:${SERVICE_USER}" "${env_file}" 2>/dev/null || true
     success "EnvironmentFile: ${env_file}"
@@ -28,7 +86,6 @@ write_env_file() {
 # ── Launcher script ───────────────────────────────────────────────────────────
 write_service_files() {
     local serve_script="${BUILD_PATH}/vllm-serve.sh"
-    local env_file="${BUILD_PATH}/vllm.env"
 
     info "Writing launcher: ${serve_script}"
     local vars='${VENV_PATH} ${BUILD_PATH} ${MODELS_DIR}'
@@ -40,11 +97,19 @@ write_service_files() {
     info "Writing systemd unit: ${SERVICE_FILE}"
     local svc_vars='${SERVICE_USER} ${BUILD_PATH}'
     render_template "${TPL_DIR}/vllm.service" "/tmp/vllm.service.rendered" "${svc_vars}"
+
+    echo ""
+    echo -e "${YELLOW}[sudo]${NC} Installing systemd service unit requires root access."
+    echo -e "       Destination: ${SERVICE_FILE}"
     sudo cp "/tmp/vllm.service.rendered" "${SERVICE_FILE}"
     rm -f "/tmp/vllm.service.rendered"
 
-    # sudoers rule so the launcher can drop page cache without a password prompt
+    # sudoers rule for cache-drop without password
     local sudoers_file="/etc/sudoers.d/vllm-drop-caches"
+    echo ""
+    echo -e "${YELLOW}[sudo]${NC} Creating sudoers rule so vLLM can drop page cache."
+    echo -e "       This avoids OOM errors on model reload — no persistent privilege."
+    echo -e "       File: ${sudoers_file}"
     echo "${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches" \
         | sudo tee "${sudoers_file}" > /dev/null
     sudo chmod 440 "${sudoers_file}"
@@ -76,7 +141,6 @@ write_model_config() {
     render_template "${TPL_DIR}/models/example.yaml" "${yaml_file}" \
         '${MODEL_NAME} ${MODEL_SHORT}'
 
-    # Also seed an example template if missing
     local ex="${MODELS_DIR}/example/gpt-oss-120b.yaml"
     if [[ ! -f "${ex}" ]]; then
         mkdir -p "${MODELS_DIR}/example"
@@ -86,10 +150,9 @@ write_model_config() {
 
     chown -R "${SERVICE_USER}:${SERVICE_USER}" "${MODELS_DIR}" 2>/dev/null || true
     success "Model config: ${yaml_file}"
-    info "Add more models: thorllm model add <org/name>"
 }
 
-# ── Activation script (manual shell use) ─────────────────────────────────────
+# ── Activation script ─────────────────────────────────────────────────────────
 write_activation_script() {
     local act="${BUILD_PATH}/activate_vllm.sh"
     config_export
@@ -107,21 +170,27 @@ write_activation_script() {
 # ── Service control ───────────────────────────────────────────────────────────
 service_ctl() {
     local cmd="$1"
+    local port="${VLLM_PORT:-8000}"
+
     case "${cmd}" in
         start)
-            info "Starting ${SERVICE_NAME}…"
+            step "Starting ${SERVICE_NAME}"
+            echo ""
+            echo -e "${YELLOW}[sudo]${NC} Starting systemd service requires elevated privileges."
             sudo systemctl start "${SERVICE_NAME}"
-            sudo systemctl status "${SERVICE_NAME}" --no-pager -l
+            _follow_until_ready
             ;;
         stop)
-            info "Stopping ${SERVICE_NAME}…"
+            step "Stopping ${SERVICE_NAME}"
             sudo systemctl stop "${SERVICE_NAME}"
+            success "Service stopped."
+            print_footer
             ;;
         restart)
-            info "Restarting ${SERVICE_NAME}…"
+            step "Restarting ${SERVICE_NAME}"
             sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
             sudo systemctl restart "${SERVICE_NAME}"
-            sudo systemctl status "${SERVICE_NAME}" --no-pager -l
+            _follow_until_ready
             ;;
         status)
             sudo systemctl status "${SERVICE_NAME}" --no-pager -l
@@ -136,4 +205,46 @@ service_logs() {
     else
         journalctl -u "${SERVICE_NAME}" -n 100 --no-pager
     fi
+}
+
+# ── Kill ──────────────────────────────────────────────────────────────────────
+service_kill() {
+    step "Force-killing vLLM"
+    echo ""
+
+    # 1) Try systemctl stop first (graceful)
+    if sudo systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+        info "Stopping systemd service…"
+        sudo systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    fi
+
+    # 2) Kill any remaining vllm / python processes holding GPU memory
+    local killed=0
+    for proc in "vllm" "vllm.entrypoints" "vllm_serve" "vllm-serve"; do
+        if pgrep -f "${proc}" &>/dev/null; then
+            sudo pkill -9 -f "${proc}" 2>/dev/null && (( killed++ )) || true
+        fi
+    done
+
+    # 3) Release GPU memory if possible
+    if command -v nvidia-smi &>/dev/null; then
+        local pids
+        pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null || true)
+        for pid in ${pids}; do
+            if kill -0 "${pid}" 2>/dev/null; then
+                sudo kill -9 "${pid}" 2>/dev/null && (( killed++ )) || true
+            fi
+        done
+    fi
+
+    if (( killed > 0 )); then
+        success "Killed ${killed} process(es)."
+    else
+        info "No vLLM processes found."
+    fi
+
+    # Drop GPU page cache
+    sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
+    success "GPU page cache cleared."
+    print_footer
 }

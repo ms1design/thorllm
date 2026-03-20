@@ -18,24 +18,25 @@ model_list() {
     local active; active=$(grep '^SERVE_MODEL=' "${BUILD_PATH}/vllm.env" 2>/dev/null \
         | cut -d= -f2 || echo "${SERVE_MODEL}")
 
-    echo ""
-    echo "  Available models (${MODELS_DIR}):"
+    usage_logo
+    echo -e "  ${BOLD}Available models${NC}  (${MUTED}${MODELS_DIR}${NC})"
     echo ""
     if [[ ! -d "${MODELS_DIR}" ]] || [[ -z "$(ls -A "${MODELS_DIR}" 2>/dev/null)" ]]; then
-        echo "  (none — run: thorllm model add <org/name>)"
+        echo -e "  ${MUTED}(none — run: thorllm model add <org/name>)${NC}"
     else
         find "${MODELS_DIR}" -name "*.yaml" ! -path "*/example/*" \
             | sort \
             | while read -r f; do
                 local rel; rel=$(realpath --relative-to="${MODELS_DIR}" "${f}" | sed 's/\.yaml$//')
                 if [[ "${rel}" == "${active}" ]]; then
-                    printf "  ${GREEN}● %-40s${NC} (active)\n" "${rel}"
+                    printf "  ${NVIDIA_GREEN}● %-40s${NC} ${MUTED}(active)${NC}\n" "${rel}"
                 else
-                    printf "  ○ %s\n" "${rel}"
+                    printf "  ${MUTED}○${NC} %s\n" "${rel}"
                 fi
             done
     fi
     echo ""
+    print_footer
 }
 
 model_add() {
@@ -61,14 +62,13 @@ model_switch() {
     [[ -f "${yaml_file}" ]] \
         || die "Model config not found: ${yaml_file}\n  Create it first: thorllm model add ${model}"
 
-    info "Switching active model to: ${model}"
+    step "Switching active model"
+    info "→ ${model}"
 
-    # Update vllm.env
     local env_file="${BUILD_PATH}/vllm.env"
     [[ -f "${env_file}" ]] || die "EnvironmentFile not found: ${env_file}\n  Run: thorllm install"
     sed -i "s|^SERVE_MODEL=.*|SERVE_MODEL=${model}|" "${env_file}"
 
-    # Update persisted config
     SERVE_MODEL="${model}"
     config_save
 
@@ -92,26 +92,9 @@ model_edit() {
     "${EDITOR:-nano}" "${yaml_file}"
 }
 
+# ── Interactive model select — delegates to TUI wizard or fallback ─────────────
 _model_select_interactive() {
-    local models=()
-    local active; active=$(grep '^SERVE_MODEL=' "${BUILD_PATH}/vllm.env" 2>/dev/null \
-        | cut -d= -f2 || echo "${SERVE_MODEL}")
-
-    if [[ -d "${MODELS_DIR}" ]] && [[ -n "$(ls -A "${MODELS_DIR}" 2>/dev/null)" ]]; then
-        while read -r f; do
-            local rel; rel=$(realpath --relative-to="${MODELS_DIR}" "${f}" | sed 's/\.yaml$//')
-            if [[ "${rel}" == "${active}" ]]; then
-                models+=("${rel}" "${rel} (active)" ON)
-            else
-                models+=("${rel}" "${rel}" OFF)
-            fi
-        done < <(find "${MODELS_DIR}" -name "*.yaml" ! -path "*/example/*" | sort)
-    fi
-
-    [[ ${#models[@]} -eq 0 ]] && { warn "No model configs found. Run: thorllm model add <org/name>"; return 1; }
-
-    local choice
-    choice=$(_wt_checklist "Select model" "Choose active model:" "${models[@]}") || return 1
-
-    [[ -n "${choice}" ]] && model_switch "${choice}"
+    # Delegated to wizard.sh where Textual / fallback logic lives
+    source "${SELF_DIR}/tui/wizard.sh"
+    _model_select_interactive
 }

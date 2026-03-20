@@ -344,10 +344,52 @@ run_install() {
 
     config_save
 
+    # Resolve final installed versions for summary
+    local installed_vllm installed_torch
+    installed_vllm=$(
+        "${VENV_PATH}/bin/python" -c \
+            "import importlib.metadata as m; print(m.version('vllm'))" 2>/dev/null || echo "${VLLM_VERSION:-unknown}"
+    )
+    installed_torch=$(
+        "${VENV_PATH}/bin/python" -c \
+            "import torch; print(torch.__version__)" 2>/dev/null || echo "${TORCH_VERSION:-unknown}"
+    )
+
+    echo ""
     step "Installation complete"
     echo ""
-    echo "  Activate:    source ${BUILD_PATH}/activate_vllm.sh"
-    echo "  Start:       thorllm start"
-    echo "  Watch logs:  thorllm logs -f"
+    echo -e "  ${NVIDIA_GREEN}What was installed:${NC}"
+    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "vLLM:"         "${installed_vllm}"
+    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "PyTorch:"      "${installed_torch}"
+    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "Model config:" "${SERVE_MODEL}"
+    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "Installed to:" "${BUILD_PATH}"
     echo ""
+    echo -e "  ${NVIDIA_GREEN}Next steps:${NC}"
+    echo ""
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "source ${BUILD_PATH}/activate_vllm.sh" \
+        "activate the vLLM environment in current shell"
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "thorllm start" \
+        "start the vLLM API server (follows logs until ready)"
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "thorllm start --port 9000" \
+        "start on a custom port"
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "thorllm logs -f" \
+        "stream live logs at any time"
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "thorllm model select" \
+        "interactive model switcher (TUI)"
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "thorllm stop" \
+        "gracefully stop the service"
+    printf "  ${CYAN}%-36s${NC} %s\n" \
+        "thorllm kill" \
+        "force-kill and free GPU memory"
+    echo ""
+    echo -e "  ${MUTED}The API will be available at: http://localhost:${VLLM_PORT:-8000}/v1${NC}"
+    echo -e "  ${MUTED}Enable TAB completion:        thorllm completion${NC}"
+    echo ""
+    print_footer
 }

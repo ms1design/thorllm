@@ -18,16 +18,17 @@ source "${SELF_DIR}/lib/common.sh"
 command -v git  &>/dev/null || die "git is required. Run: sudo apt-get install -y git"
 command -v curl &>/dev/null || die "curl is required. Run: sudo apt-get install -y curl"
 
-info "Installing thorllm to ${INSTALL_DIR}…"
 echo ""
-
+echo ""
 usage_logo
+echo ""
 echo ""
 
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "Updating existing install…"
     git -C "${INSTALL_DIR}" pull --ff-only
 else
+    info "Installing thorllm to ${INSTALL_DIR}…"
     git clone --depth=1 "${REPO_URL}" "${INSTALL_DIR}"
 fi
 
