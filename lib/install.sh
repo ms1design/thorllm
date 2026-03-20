@@ -399,6 +399,12 @@ run_install() {
     step "vLLM installer for Jetson Thor"
     sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
 
+    # Ensure key directories exist immediately — so even a partial run
+    # leaves the user with a usable BUILD_PATH layout.
+    mkdir -p "${BUILD_PATH}"
+    mkdir -p "${MODELS_DIR:-${BUILD_PATH}/models}"
+    mkdir -p "${CACHE_ROOT:-${HOME}/.cache/vllm}"
+
     preflight
     create_cache_dirs
     install_cudss
@@ -451,37 +457,50 @@ run_install() {
     echo ""
     step "Installation complete"
     echo ""
-    echo -e "  What was installed:"
-    printf "  %-22s%s\n" "vLLM:"         "${installed_vllm}"
-    printf "  %-22s%s\n" "PyTorch:"      "${installed_torch}"
-    printf "  %-22s%s\n" "Model config:" "${SERVE_MODEL}"
-    printf "  %-22s%s\n" "Installed to:" "${BUILD_PATH}"
+    echo -e "  \033[1;32mInstalled components:\033[0m"
     echo ""
-    echo -e "  Next steps:"
+    printf "  %-26s%s\n" "vLLM:"              "${installed_vllm}"
+    printf "  %-26s%s\n" "PyTorch:"           "${installed_torch}"
+    printf "  %-26s%s\n" "Active model:"      "${SERVE_MODEL}"
     echo ""
-    printf "  %-36s %s\n" \
+    echo -e "  \033[1;32mPaths:\033[0m"
+    echo ""
+    printf "  %-26s%s\n" "Install root:"      "${BUILD_PATH}"
+    printf "  %-26s%s\n" "Python venv:"       "${VENV_PATH}"
+    printf "  %-26s%s\n" "Model configs:"     "${MODELS_DIR}"
+    printf "  %-26s%s\n" "Cache root:"        "${CACHE_ROOT}"
+    printf "  %-26s%s\n" "HF model cache:"    "${CACHE_ROOT}/huggingface"
+    printf "  %-26s%s\n" "Triton cache:"      "${CACHE_ROOT}/triton"
+    printf "  %-26s%s\n" "Config file:"       "${BUILD_PATH}/thorllm.conf"
+    printf "  %-26s%s\n" "Env file:"          "${BUILD_PATH}/vllm.env"
+    printf "  %-26s%s\n" "Activation script:" "${BUILD_PATH}/activate_vllm.sh"
+    printf "  %-26s%s\n" "systemd unit:"      "${SERVICE_FILE}"
+    echo ""
+    echo -e "  \033[1;32mNext steps:\033[0m"
+    echo ""
+    printf "  %-38s %s\n" \
         "source ${BUILD_PATH}/activate_vllm.sh" \
-        "activate the vLLM environment in current shell"
-    printf "  %-36s %s\n" \
+        "activate vLLM environment in current shell"
+    printf "  %-38s %s\n" \
         "thorllm start" \
-        "start the vLLM API server (follows logs until ready)"
-    printf "  %-36s %s\n" \
+        "start the vLLM API server"
+    printf "  %-38s %s\n" \
         "thorllm start --port 9000" \
         "start on a custom port"
-    printf "  %-36s %s\n" \
+    printf "  %-38s %s\n" \
         "thorllm logs -f" \
-        "stream live logs at any time"
-    printf "  %-36s %s\n" \
-        "thorllm model select" \
-        "interactive model switcher (TUI)"
-    printf "  %-36s %s\n" \
+        "stream live logs"
+    printf "  %-38s %s\n" \
+        "thorllm model" \
+        "open interactive model manager (TUI)"
+    printf "  %-38s %s\n" \
         "thorllm stop" \
         "gracefully stop the service"
-    printf "  %-36s %s\n" \
+    printf "  %-38s %s\n" \
         "thorllm kill" \
         "force-kill and free GPU memory"
     echo ""
-    echo -e "  The API will be available at: http://localhost:${VLLM_PORT:-8000}/v1"
-    echo -e "  Enable TAB completion:        thorllm completion"
+    echo -e "  API endpoint:  http://localhost:${VLLM_PORT:-8000}/v1"
+    echo -e "  TAB completion:  thorllm completion"
     echo ""
 }

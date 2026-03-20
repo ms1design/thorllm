@@ -41,14 +41,14 @@ Install:
 
 Service:
   start [-p PORT]        Start the vLLM service
-  start --port PORT      Start on a custom port (default: 8000)
   stop                   Stop the vLLM service
   restart [-p PORT]      Restart the vLLM service
   status                 Show service status
   kill                   Force-kill vLLM and free GPU memory
   logs [-f]              Show service logs (use -f to follow)
 
-Models:
+Models  (opens TUI when no subcommand given):
+  model                  Open interactive TUI model manager
   model list             List available model configs
   model add <org/name>   Create a new model config from template
   model switch <name>    Switch the active model
@@ -65,7 +65,7 @@ System:
   completion             Print TAB-completion setup instructions
 
 Options:
-  -h, --help             Show this help
+  -h, --help             Show this help (also accepted after any command)
   --no-color             Disable colour output
   --build-path <path>    Override BUILD_PATH (default: ~/thorllm)
   -p, --port <port>      Port for vLLM API server (used with start/restart)
@@ -80,8 +80,8 @@ Environment:
 Examples:
   thorllm setup
   thorllm start --port 9000
+  thorllm model                          # open TUI model manager
   thorllm model add Qwen/Qwen3-VL-32B-Instruct
-  thorllm model select
   thorllm logs -f
   thorllm kill
 EOF
@@ -96,43 +96,66 @@ CMD=""
 SUBCMD=""
 MODEL_ARG=""
 
+# Scan for global flags first; anything that looks like a command breaks the loop
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help)      usage; exit 0 ;;
-        --no-color)     NO_COLOR=1; shift ;;
-        --build-path)   BUILD_PATH="$2"; shift 2 ;;
-        --update)       UPDATE=1; shift ;;
+        -h|--help)
+            # Accept -h/--help anywhere in the command line — always shows usage
+            usage; exit 0
+            ;;
+        --no-color)
+            NO_COLOR=1; shift
+            ;;
+        --build-path)
+            BUILD_PATH="$2"; shift 2
+            ;;
+        --update)
+            UPDATE=1; shift
+            ;;
         -p|--port)
-            export VLLM_PORT="$2"; shift 2 ;;
-        setup)          CMD=setup; shift ;;
-        install)        CMD=install; shift ;;
-        start)          CMD=start; shift ;;
-        stop)           CMD=stop; shift ;;
-        restart)        CMD=restart; shift ;;
-        status)         CMD=status; shift ;;
-        kill)           CMD=kill; shift ;;
+            export VLLM_PORT="$2"; shift 2
+            ;;
+        setup)    CMD=setup;       shift ;;
+        install)  CMD=install;     shift ;;
+        start)    CMD=start;       shift ;;
+        stop)     CMD=stop;        shift ;;
+        restart)  CMD=restart;     shift ;;
+        status)   CMD=status;      shift ;;
+        kill)     CMD=kill;        shift ;;
+        version)  CMD=version;     shift ;;
+        config)   CMD=config_show; shift ;;
+        uninstall) CMD=uninstall;  shift ;;
+        completion) CMD=completion; shift ;;
         logs)
-            CMD=logs
-            shift
-            # -f is a logs-only flag (not global)
+            CMD=logs; shift
             [[ "${1:-}" == "-f" ]] && { FOLLOW_LOGS=1; shift; } || true
             ;;
         model)
             CMD=model
-            SUBCMD="${2:-}"
-            MODEL_ARG="${3:-}"
-            shift; [[ $# -gt 0 ]] && shift || true
-            # Treat -h / --help as a request for model help, not a subcommand
-            if [[ "${SUBCMD}" == "-h" || "${SUBCMD}" == "--help" ]]; then
-                SUBCMD=""
-            fi
-            [[ $# -gt 0 && ! "$1" =~ ^- ]] && { MODEL_ARG="$1"; shift; } || true
+            # Peek at next token: may be subcommand, flag, or nothing
+            shift
+            case "${1:-}" in
+                -h|--help|"")
+                    # thorllm model -h  →  same as thorllm model (no subcommand)
+                    SUBCMD=""
+                    [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && shift || true
+                    ;;
+                list|add|switch|show|edit|select)
+                    SUBCMD="$1"; shift
+                    # Grab the model name argument if present (not a flag)
+                    if [[ $# -gt 0 && ! "$1" =~ ^- ]]; then
+                        MODEL_ARG="$1"; shift
+                    fi
+                    ;;
+                *)
+                    # Unknown subcommand — will be caught in dispatch
+                    SUBCMD="$1"; shift
+                    ;;
+            esac
             ;;
-        version)        CMD=version; shift ;;
-        config)         CMD=config_show; shift ;;
-        uninstall)      CMD=uninstall; shift ;;
-        completion)     CMD=completion; shift ;;
-        *)              die "Unknown command: $1. Run 'thorllm --help'" ;;
+        *)
+            die "Unknown command: $1. Run 'thorllm --help'"
+            ;;
     esac
 done
 
@@ -161,29 +184,36 @@ case "${CMD:-}" in
     model)
         source "${LIB_DIR}/model.sh"
         case "${SUBCMD:-}" in
-            list)   model_list ;;
+            list)
+                model_list
+                ;;
             add)
                 [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model add <org/name>"
-                model_add "${MODEL_ARG}" ;;
+                model_add "${MODEL_ARG}"
+                ;;
             switch)
                 [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model switch <org/name>"
-                model_switch "${MODEL_ARG}" ;;
+                model_switch "${MODEL_ARG}"
+                ;;
             show)
                 [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model show <org/name>"
-                model_show "${MODEL_ARG}" ;;
+                model_show "${MODEL_ARG}"
+                ;;
             edit)
                 [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model edit <org/name>"
-                model_edit "${MODEL_ARG}" ;;
+                model_edit "${MODEL_ARG}"
+                ;;
             select)
                 source "${SELF_DIR}/tui/wizard.sh"
-                _model_select_interactive ;;
-            *)
-                if [[ -n "${SUBCMD:-}" ]]; then
-                    die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch select show edit"
-                fi
-                # No subcommand — open TUI model manager
+                _model_select_interactive
+                ;;
+            "")
+                # No subcommand (or -h was given) — open TUI model manager
                 source "${SELF_DIR}/tui/wizard.sh"
                 model_manage_interactive
+                ;;
+            *)
+                die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch select show edit"
                 ;;
         esac
         ;;
