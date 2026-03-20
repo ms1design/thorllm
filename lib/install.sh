@@ -301,6 +301,7 @@ vllm_ver = '${vllm_ver}'
 range_spec = '${range_spec}'
 
 def version_tuple(v):
+    v = v.split('+')[0]
     return tuple(map(int, v.split('.')))
 
 min_ver = None
