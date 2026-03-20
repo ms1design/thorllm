@@ -151,7 +151,6 @@ LoadingIndicator {
 }
 
 /* ── Navigation bar ── */
-/* Only layout here — button colours are handled by Textual variants */
 #nav {
     dock: bottom;
     height: 6;
@@ -161,7 +160,66 @@ LoadingIndicator {
 }
 .nav-left  { width: 1fr; height: 3; align: left middle; }
 .nav-right { width: auto; height: 3; align: right middle; }
-#nav Button { margin: 0 1; min-width: 14; }
+
+/* Explicit button colours — Textual's built-in variant palette does not
+   contrast against this dark green theme, so we override every state here. */
+#nav Button {
+    margin: 0 1;
+    min-width: 14;
+    background: #162000;
+    border: tall #2a3d00;
+    color: #c8e88a;
+}
+#nav Button:hover {
+    background: #1e3200;
+    border: tall #3a5a00;
+    color: #a0d832;
+}
+#nav Button:focus {
+    background: #1e3200;
+    border: tall #4a7200;
+    color: #a0d832;
+    text-style: bold;
+}
+
+/* primary  → Next → */
+#nav Button.-primary {
+    background: #1a3800;
+    border: tall #76b900;
+    color: #b8e060;
+    text-style: bold;
+}
+#nav Button.-primary:hover { background: #253f00; color: #c8e88a; }
+#nav Button.-primary:focus { background: #2d4700; border: tall #a0d832; color: #d4f080; }
+
+/* success  → ✓ Install / ✓ Select */
+#nav Button.-success {
+    background: #0d2800;
+    border: tall #5ab900;
+    color: #80d840;
+    text-style: bold;
+}
+#nav Button.-success:hover { background: #183800; color: #a8e878; }
+#nav Button.-success:focus { background: #1f4000; border: tall #76b900; color: #c8e88a; }
+
+/* error    → ✕ Cancel / ✕ Exit */
+#nav Button.-error {
+    background: #280800;
+    border: tall #803000;
+    color: #d06040;
+    text-style: bold;
+}
+#nav Button.-error:hover { background: #3a1000; color: #ffbd2e; }
+#nav Button.-error:focus { background: #3a1000; border: tall #a04020; color: #ffbd2e; }
+
+/* default  → ← Prev / secondary actions */
+#nav Button.-default {
+    background: #111a00;
+    border: tall #2a3d00;
+    color: #8ab840;
+}
+#nav Button.-default:hover { background: #1a2800; color: #a0d832; }
+#nav Button.-default:focus { background: #1e3200; border: tall #3a5a00; color: #b8e060; }
 """
 
 # ─── Network helpers ──────────────────────────────────────────────────────────

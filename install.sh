@@ -105,6 +105,21 @@ mkdir -p "${BIN_DIR}"
 ln -sf "${INSTALL_DIR}/bin/thorllm" "${BIN_DIR}/thorllm"
 success "CLI symlink: ${BIN_DIR}/thorllm -> ${INSTALL_DIR}/bin/thorllm"
 
+# ── Scaffold required directories ─────────────────────────────────────────────
+# Create the full BUILD_PATH layout now so it exists before the wizard or any
+# other command runs.  These are idempotent — safe to re-run on update.
+_i "Scaffolding installation directories..."
+mkdir -p "${BUILD_PATH}"
+mkdir -p "${BUILD_PATH}/models"
+mkdir -p "${CACHE_ROOT}"
+chmod g+s "${BUILD_PATH}" "${BUILD_PATH}/models" 2>/dev/null || true
+success "Directory layout ready"
+_i "  vLLM installation   ${BUILD_PATH}"
+_i "  Model configs       ${BUILD_PATH}/models"
+_i "  Cache files         ${CACHE_ROOT}"
+_i "  CLI symlink         ${BIN_DIR}/thorllm"
+_i "  thorllm repo        ${INSTALL_DIR}"
+
 # ── PATH persistence ─────────────────────────────────────────────────────────
 export PATH="${BIN_DIR}:${PATH}"
 
@@ -141,10 +156,21 @@ echo ""
 usage_logo
 success "thorllm v${VERSION} installed at ${BIN_DIR}/thorllm"
 echo ""
-echo "  Run the setup wizard:  thorllm setup"
-echo "  Or install directly:   thorllm install"
-echo "  Help:                  thorllm --help"
-echo "  TAB completion:        active in new shells"
+echo "  Bootstrap layout:"
+printf "  %-24s%s\n" "vLLM installation"   "${BUILD_PATH}"
+printf "  %-24s%s\n" "Python venv"         "${BUILD_PATH}/.vllm  (created by: thorllm install)"
+printf "  %-24s%s\n" "Model configs"       "${BUILD_PATH}/models"
+printf "  %-24s%s\n" "Cache files"         "${CACHE_ROOT}"
+printf "  %-24s%s\n" "Systemd service"     "/etc/systemd/system/vllm.service  (by: thorllm install)"
+printf "  %-24s%s\n" "CLI symlink"         "${BIN_DIR}/thorllm"
+printf "  %-24s%s\n" "thorllm repo"        "${INSTALL_DIR}"
+echo ""
+echo "  Next steps:"
+echo "    thorllm setup       ← interactive TUI wizard (configures + installs vLLM)"
+echo "    thorllm install     ← non-interactive install (uses saved config)"
+echo "    thorllm --help"
+echo ""
+echo "  TAB completion active in new shells."
 echo ""
 
 # ── Auto-launch wizard if interactive ────────────────────────────────────────

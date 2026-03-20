@@ -41,30 +41,48 @@ write_service_files() {
 
     info "Writing systemd unit: ${SERVICE_FILE}"
     local svc_vars='${SERVICE_USER} ${BUILD_PATH}'
-    render_template "${TPL_DIR}/vllm.service" "/tmp/vllm.service.rendered" "${svc_vars}"
+    local _rendered_svc="/tmp/vllm.service.rendered.$$"
+    render_template "${TPL_DIR}/vllm.service" "${_rendered_svc}" "${svc_vars}"
 
     echo ""
-    echo -e "[sudo] Installing systemd service unit requires root access."
-    echo -e "       Destination: ${SERVICE_FILE}"
-    sudo cp "/tmp/vllm.service.rendered" "${SERVICE_FILE}"
-    rm -f "/tmp/vllm.service.rendered"
+    echo "[sudo] Installing systemd service unit requires root access."
+    echo "       Destination: ${SERVICE_FILE}"
+
+    # Wrap all sudo calls with || fallback — a sudo timeout or missing permission
+    # must NOT abort the entire install under set -euo pipefail.
+    local _svc_installed=0
+    if sudo cp "${_rendered_svc}" "${SERVICE_FILE}" 2>/dev/null; then
+        _svc_installed=1
+        rm -f "${_rendered_svc}"
+        success "Service file: ${SERVICE_FILE}"
+    else
+        warn "Could not install systemd service (sudo unavailable or timed out)."
+        warn "  To install manually after this run:"
+        warn "    sudo cp ${_rendered_svc} ${SERVICE_FILE}"
+        warn "    sudo systemctl daemon-reload && sudo systemctl enable vllm"
+    fi
 
     # sudoers rule for cache-drop without password
-    local sudoers_file="/etc/sudoers.d/vllm-drop-caches"
-    echo ""
-    echo -e "[sudo] Creating sudoers rule so vLLM can drop page cache."
-    echo -e "       This avoids OOM errors on model reload — no persistent privilege."
-    echo -e "       File: ${sudoers_file}"
-    echo "${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches" \
-        | sudo tee "${sudoers_file}" > /dev/null
-    sudo chmod 440 "${sudoers_file}"
-    sudo visudo -cf "${sudoers_file}" \
-        && success "sudoers rule: ${sudoers_file}" \
-        || { warn "sudoers rule invalid — removing"; sudo rm -f "${sudoers_file}"; }
+    if [[ "${_svc_installed}" == "1" ]]; then
+        local sudoers_file="/etc/sudoers.d/vllm-drop-caches"
+        echo ""
+        echo "[sudo] Creating sudoers rule so vLLM can drop page cache without a password."
+        echo "       File: ${sudoers_file}"
+        if echo "${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches" \
+                | sudo tee "${sudoers_file}" > /dev/null 2>&1; then
+            sudo chmod 440 "${sudoers_file}" 2>/dev/null || true
+            sudo visudo -cf "${sudoers_file}" 2>/dev/null \
+                && success "sudoers rule: ${sudoers_file}" \
+                || { warn "sudoers rule invalid — removing"; sudo rm -f "${sudoers_file}" 2>/dev/null || true; }
+        else
+            warn "Could not write sudoers rule — skipping (non-fatal)."
+        fi
 
-    sudo systemctl daemon-reload
-    success "Service installed: ${SERVICE_FILE}"
-    info "Not enabled yet. Run: thorllm start  or  sudo systemctl enable vllm"
+        sudo systemctl daemon-reload 2>/dev/null \
+            && success "Service installed: ${SERVICE_FILE}" \
+            || warn "systemctl daemon-reload failed — run manually: sudo systemctl daemon-reload"
+        info "Not enabled yet. Run: thorllm start  or  sudo systemctl enable vllm"
+    fi
 }
 
 # ── Model config YAML ─────────────────────────────────────────────────────────
@@ -74,27 +92,45 @@ write_model_config() {
     local name; name=$(echo "${model}" | cut -d/ -f2)
     local yaml_file="${MODELS_DIR}/${org}/${name}.yaml"
 
+    # Ensure MODELS_DIR and TPL_DIR are available (config_export may not have
+    # been called yet in some code paths, e.g. from install.sh directly).
+    MODELS_DIR="${MODELS_DIR:-${BUILD_PATH}/models}"
+    TPL_DIR="${TPL_DIR:-${SELF_DIR:+${SELF_DIR}/templates}}"
+    TPL_DIR="${TPL_DIR:-${HOME}/.local/share/thorllm/templates}"
+    local _tpl="${TPL_DIR}/models/example.yaml"
+
+    if [[ ! -f "${_tpl}" ]]; then
+        warn "Model template not found: ${_tpl} — skipping model config creation."
+        warn "  Clone the thorllm repo to get templates: thorllm repo at ${HOME}/.local/share/thorllm"
+        return 1
+    fi
+
     mkdir -p "${MODELS_DIR}/${org}"
 
     if [[ -f "${yaml_file}" ]]; then
         warn "Model config exists — not overwriting: ${yaml_file}"
-        return
+    else
+        info "Writing model config: ${yaml_file}"
+        export MODEL_NAME="${model}" MODEL_SHORT="${name}"
+        render_template "${_tpl}" "${yaml_file}" '${MODEL_NAME} ${MODEL_SHORT}'
+        success "Model config: ${yaml_file}"
     fi
 
-    info "Writing model config: ${yaml_file}"
-    export MODEL_NAME="${model}" MODEL_SHORT="${name}"
-    render_template "${TPL_DIR}/models/example.yaml" "${yaml_file}" \
-        '${MODEL_NAME} ${MODEL_SHORT}'
-
+    # Always ensure the generic example template exists — useful for
+    # 'thorllm model add' reference and README examples.
     local ex="${MODELS_DIR}/example/gpt-oss-120b.yaml"
     if [[ ! -f "${ex}" ]]; then
         mkdir -p "${MODELS_DIR}/example"
-        cp "${yaml_file}" "${ex}"
+        # Seed the example with the default model values so it is always readable.
+        export MODEL_NAME="openai/gpt-oss-120b" MODEL_SHORT="gpt-oss-120b"
+        render_template "${_tpl}" "${ex}" '${MODEL_NAME} ${MODEL_SHORT}'
+        # Restore the actual model vars in case callers use them afterwards.
+        export MODEL_NAME="${model}" MODEL_SHORT="${name}"
         info "Example template: ${ex}"
     fi
 
     chown -R "${SERVICE_USER}:${SERVICE_USER}" "${MODELS_DIR}" 2>/dev/null || true
-    success "Model config: ${yaml_file}"
+    info "Add more models: thorllm model add <org/name>"
 }
 
 # ── Activation script ─────────────────────────────────────────────────────────
