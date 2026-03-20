@@ -29,17 +29,17 @@ fi
 usage() {
     usage_logo
     cat <<EOF
-${BOLD}${NVIDIA_GREEN}thorllm${NC} ${VERSION}${VLLM_VERSION_INSTALLED:+ — vLLM ${VLLM_VERSION_INSTALLED}} — vLLM manager for NVIDIA Jetson Thor
+thorllm ${VERSION}${VLLM_VERSION_INSTALLED:+ — vLLM ${VLLM_VERSION_INSTALLED}} — vLLM manager for NVIDIA Jetson Thor
 
-${BOLD}Usage:${NC}
+Usage:
   thorllm <command> [options]
 
-${BOLD}${NVIDIA_GREEN}Install:${NC}
+Install:
   setup                  Interactive TUI setup wizard
   install                Run full install (non-interactive, uses config)
   install --update       Update vLLM to latest version
 
-${BOLD}${NVIDIA_GREEN}Service:${NC}
+Service:
   start [-p PORT]        Start the vLLM service (follows logs until ready)
   start --port PORT      Start on a custom port (default: 8000)
   stop                   Stop the vLLM service
@@ -48,7 +48,7 @@ ${BOLD}${NVIDIA_GREEN}Service:${NC}
   kill                   Force-kill vLLM and free GPU memory
   logs [-f]              Show service logs (use -f to follow)
 
-${BOLD}${NVIDIA_GREEN}Models:${NC}
+Models:
   model list             List available model configs
   model add <org/name>   Create a new model config from template
   model switch <name>    Switch the active model
@@ -56,28 +56,28 @@ ${BOLD}${NVIDIA_GREEN}Models:${NC}
   model show <name>      Print the model config YAML
   model edit <name>      Open model config in \$EDITOR
 
-${BOLD}${NVIDIA_GREEN}Info:${NC}
+Info:
   version                Show installed vLLM and dependency versions
   config                 Show current configuration
 
-${BOLD}${NVIDIA_GREEN}System:${NC}
+System:
   uninstall              Remove thorllm and all installed components
   completion             Print TAB-completion setup instructions
 
-${BOLD}Options:${NC}
+Options:
   -h, --help             Show this help
   --no-color             Disable colour output
   --build-path <path>    Override BUILD_PATH (default: ~/thorllm)
   -p, --port <port>      Port for vLLM API server (used with start/restart)
 
-${BOLD}Environment:${NC}
+Environment:
   BUILD_PATH             Installation directory  (default: ~/thorllm)
   CACHE_ROOT             Cache root directory    (default: ~/.cache/vllm)
   SERVE_MODEL            Active model            (default: openai/gpt-oss-120b)
   VLLM_PORT              API port                (default: 8000)
   HF_TOKEN               HuggingFace access token
 
-${BOLD}Examples:${NC}
+Examples:
   thorllm setup
   thorllm start --port 9000
   thorllm model add Qwen/Qwen3-VL-32B-Instruct

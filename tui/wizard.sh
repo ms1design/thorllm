@@ -50,26 +50,26 @@ _fallback_wizard() {
     usage_logo
 
     local val
-    read -r -p "$(echo -e "${CYAN}BUILD_PATH${NC} [${BUILD_PATH}]: ")" val
+    read -r -p "$(echo -e "BUILD_PATH [${BUILD_PATH}]: ")" val
     [[ -n "${val}" ]] && BUILD_PATH="${val}"
 
-    read -r -p "$(echo -e "${CYAN}CACHE_ROOT${NC} [${CACHE_ROOT}]: ")" val
+    read -r -p "$(echo -e "CACHE_ROOT [${CACHE_ROOT}]: ")" val
     [[ -n "${val}" ]] && CACHE_ROOT="${val}"
 
-    read -r -p "$(echo -e "${CYAN}VLLM_VERSION${NC} (leave blank for latest) [${VLLM_VERSION}]: ")" val
+    read -r -p "$(echo -e "VLLM_VERSION (leave blank for latest) [${VLLM_VERSION}]: ")" val
     VLLM_VERSION="${val:-${VLLM_VERSION}}"
 
-    read -r -p "$(echo -e "${CYAN}TORCH_VERSION${NC} [${TORCH_VERSION}]: ")" val
+    read -r -p "$(echo -e "TORCH_VERSION [${TORCH_VERSION}]: ")" val
     [[ -n "${val}" ]] && TORCH_VERSION="${val}"
 
-    read -r -p "$(echo -e "${CYAN}SERVE_MODEL${NC} [${SERVE_MODEL}]: ")" val
+    read -r -p "$(echo -e "SERVE_MODEL [${SERVE_MODEL}]: ")" val
     [[ -n "${val}" ]] && SERVE_MODEL="${val}"
 
-    read -r -s -p "$(echo -e "${CYAN}HF_TOKEN${NC} (hidden, optional): ")" val
+    read -r -s -p "$(echo -e "HF_TOKEN (hidden, optional): ")" val
     echo ""
     HF_TOKEN="${val}"
 
-    read -r -p "$(echo -e "${CYAN}SERVICE_USER${NC} [${SERVICE_USER}]: ")" val
+    read -r -p "$(echo -e "SERVICE_USER [${SERVICE_USER}]: ")" val
     [[ -n "${val}" ]] && SERVICE_USER="${val}"
 
     export VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
@@ -142,12 +142,12 @@ _model_select_interactive() {
         local i=1
         for m in "${models[@]}"; do
             local marker="  ○"
-            [[ "${m}" == "${active}" ]] && marker="${NVIDIA_GREEN}  ●${NC}"
+            [[ "${m}" == "${active}" ]] && marker="  ●"
             echo -e "${marker} ${i}) ${m}"
             (( i++ ))
         done
         echo ""
-        read -r -p "$(echo -e "${CYAN}Select number [1-${#models[@]}]:${NC} ")" choice
+        read -r -p "$(echo -e "Select number [1-${#models[@]}]: ")" choice
         if [[ "${choice}" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#models[@]} )); then
             local selected="${models[$((choice-1))]}"
             source "${LIB_DIR}/model.sh"

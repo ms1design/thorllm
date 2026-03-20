@@ -1,0 +1,32 @@
+# =============================================================================
+# thorllm patch registry
+# Maps each patch to the vLLM version ranges it applies to.
+#
+# Format per patch:
+#   description: human-readable summary
+#   applies_to:
+#     ">=X.Y.Z,<A.B.C": true   # apply for this range
+#     ">=A.B.C":         false  # do NOT apply (upstream fixed it)
+#   notes: optional explanation
+# =============================================================================
+
+patches:
+  patch_sm110:
+    description: "SM110 (Jetson Thor) CUTLASS NVFP4 capability-family fix"
+    notes: >
+      vLLM's NVFP4 backend uses is_device_capability_family(100) which matches
+      SM10.x Blackwell but not SM11.x Thor. This patch adds SM110 to the
+      NVFP4 code-path and excludes it from the broken Triton MXFP4 kernels.
+    applies_to:
+      ">=0.8.0,<99.0.0": true
+
+  patch_layernorm:
+    description: "RMSNormGated missing activation attribute fix"
+    notes: >
+      In vLLM <0.16.0, RMSNormGated.__init__ does not accept or store the
+      'activation' parameter, causing AttributeError when loading NVFP4 gated
+      models. From 0.16.0 onwards the attribute is already present upstream
+      and this patch must NOT be applied (would cause duplicate-argument error).
+    applies_to:
+      ">=0.8.0,<0.16.0": true
+      ">=0.16.0":         false

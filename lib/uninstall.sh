@@ -5,152 +5,119 @@
 
 LIB_DIR="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 BIN_DIR="${BIN_DIR:-${HOME}/.local/bin}"
+_SHARE_DIR="${HOME}/.local/share/thorllm"
 
-# ── Uninstall confirmation ────────────────────────────────────────────────────
 confirm_uninstall() {
     step "Uninstall thorllm"
+    echo "This will permanently remove:"
     echo ""
-    echo -e "${RED}This will permanently remove:${NC}"
+    echo "  vLLM installation       ${BUILD_PATH}"
+    echo "  Python venv             ${VENV_PATH}"
+    echo "  Model configs           ${MODELS_DIR}"
+    echo "  Cache files             ${CACHE_ROOT}"
+    echo "  Systemd service         ${SERVICE_FILE}"
+    echo "  CLI symlink             ${BIN_DIR}/thorllm"
+    echo "  thorllm repo            ${_SHARE_DIR}"
     echo ""
-    echo "  • vLLM installation at ${BUILD_PATH}"
-    echo "  • Python virtual environment at ${VENV_PATH}"
-    echo "  • Model configs in ${MODELS_DIR}"
-    echo "  • Cache files in ${CACHE_ROOT}"
-    echo "  • Systemd service file at ${SERVICE_FILE}"
-    echo "  • Environment file at ${BUILD_PATH}/vllm.env"
-    echo "  • Activation script at ${BUILD_PATH}/activate_vllm.sh"
-    echo "  • Thorllm CLI symlink at ${BIN_DIR}/thorllm"
-    echo "  • Thorllm repo at ${LIB_DIR}"
+    echo "NOTE: HuggingFace model weights in ~/.cache/huggingface will NOT be deleted."
     echo ""
-    echo -e "${YELLOW}NOTE: Your home directory and HuggingFace cache will NOT be deleted.${NC}"
-    echo ""
-    confirm "Are you sure you want to uninstall thorllm? [y/N]" || die "Uninstall cancelled."
+    confirm "Are you sure you want to uninstall thorllm?" || die "Uninstall cancelled."
 }
 
-# ── Stop and disable service ──────────────────────────────────────────────────
 stop_service() {
     step "Stopping vLLM service"
-
-    if sudo systemctl is-active --quiet vllm 2>/dev/null; then
-        info "Stopping vllm service…"
-        sudo systemctl stop vllm 2>/dev/null || warn "Failed to stop vllm service."
+    if sudo systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+        sudo systemctl stop "${SERVICE_NAME}" 2>/dev/null || warn "Failed to stop ${SERVICE_NAME}."
     else
-        info "vllm service not running."
+        info "${SERVICE_NAME} not running."
     fi
-
-    if sudo systemctl is-enabled --quiet vllm 2>/dev/null; then
-        info "Disabling vllm service…"
-        sudo systemctl disable vllm 2>/dev/null || warn "Failed to disable vllm service."
-    else
-        info "vllm service not enabled."
+    if sudo systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null; then
+        sudo systemctl disable "${SERVICE_NAME}" 2>/dev/null || warn "Failed to disable ${SERVICE_NAME}."
     fi
-
     success "Service stopped and disabled."
 }
 
-# ── Remove systemd components ─────────────────────────────────────────────────
 remove_systemd() {
     step "Removing systemd components"
-
     local sudoers_file="/etc/sudoers.d/vllm-drop-caches"
 
     if [[ -f "${SERVICE_FILE}" ]]; then
-        info "Removing service file: ${SERVICE_FILE}"
         sudo rm -f "${SERVICE_FILE}"
-        success "Service file removed."
-    else
-        info "Service file not found — already removed."
+        success "Removed: ${SERVICE_FILE}"
     fi
-
     if [[ -f "${sudoers_file}" ]]; then
-        info "Removing sudoers rule: ${sudoers_file}"
         sudo rm -f "${sudoers_file}"
-        success "Sudoers rule removed."
-    else
-        info "Sudoers rule not found — already removed."
+        success "Removed: ${sudoers_file}"
     fi
-
-    info "Reloading systemd daemon…"
-    sudo systemctl daemon-reload 2>/dev/null || warn "Failed to reload systemd daemon."
-
-    success "Systemd components removed."
+    sudo systemctl daemon-reload 2>/dev/null || true
 }
 
-# ── Remove build directory and venv ───────────────────────────────────────────
 remove_build() {
     step "Removing build directory"
-
     if [[ -d "${BUILD_PATH}" ]]; then
-        info "Removing ${BUILD_PATH}…"
         rm -rf "${BUILD_PATH}"
-        success "Build directory removed."
+        success "Removed: ${BUILD_PATH}"
     else
-        info "Build directory not found: ${BUILD_PATH}"
+        info "Not found: ${BUILD_PATH}"
     fi
 }
 
-# ── Remove thorllm repo and CLI ───────────────────────────────────────────────
-remove_thorllm() {
+remove_thorllm_install() {
     step "Removing thorllm installation"
 
-    if [[ -d "${LIB_DIR}" ]]; then
-        info "Removing thorllm repo at ${LIB_DIR}…"
-        rm -rf "${LIB_DIR}"
-        success "Thorllm repo removed."
+    # Remove the share directory (cloned repo / installed files)
+    if [[ -d "${_SHARE_DIR}" ]]; then
+        rm -rf "${_SHARE_DIR}"
+        success "Removed: ${_SHARE_DIR}"
     else
-        info "Thorllm repo not found: ${LIB_DIR}"
+        info "Not found: ${_SHARE_DIR}"
     fi
 
+    # Also remove LIB_DIR if it differs (e.g. custom INSTALL_DIR was used)
+    local _lib_parent
+    _lib_parent="$(dirname "${LIB_DIR}")"
+    if [[ -d "${_lib_parent}" && "${_lib_parent}" != "${_SHARE_DIR}" && \
+          "${_lib_parent}" != "${HOME}" && "${_lib_parent}" != "/" ]]; then
+        if [[ -f "${_lib_parent}/bin/thorllm" ]]; then
+            rm -rf "${_lib_parent}"
+            success "Removed: ${_lib_parent}"
+        fi
+    fi
+
+    # Remove CLI symlink
     if [[ -L "${BIN_DIR}/thorllm" ]]; then
-        info "Removing CLI symlink at ${BIN_DIR}/thorllm…"
         rm -f "${BIN_DIR}/thorllm"
-        success "CLI symlink removed."
-    else
-        info "CLI symlink not found: ${BIN_DIR}/thorllm"
+        success "Removed: ${BIN_DIR}/thorllm"
     fi
 }
 
-# ── Remove shellrc entries ────────────────────────────────────────────────────
 remove_shellrc_entries() {
     step "Cleaning shell configuration"
-
-    local shellrcs=("${HOME}/.bashrc" "${HOME}/.zshrc")
     local cleaned=0
-
-    for rc in "${shellrcs[@]}"; do
-        if [[ -f "${rc}" ]] && grep -q "thorllm" "${rc}" 2>/dev/null; then
-            info "Removing thorllm entries from ${rc}…"
-            local tmp_rc="${rc}.tmp"
-            grep -v 'thorllm' "${rc}" > "${tmp_rc}" 2>/dev/null || true
-            mv "${tmp_rc}" "${rc}"
+    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+        if [[ -f "${rc}" ]] && grep -q 'thorllm' "${rc}" 2>/dev/null; then
+            local tmp="${rc}.tmp"
+            grep -v 'thorllm' "${rc}" > "${tmp}" 2>/dev/null || true
+            mv "${tmp}" "${rc}"
+            success "Cleaned thorllm entries from ${rc}"
             cleaned=1
         fi
     done
-
-    if [[ ${cleaned} -eq 1 ]]; then
-        success "Shell configuration cleaned."
-    else
-        info "No thorllm entries found in shell configs."
-    fi
+    [[ ${cleaned} -eq 0 ]] && info "No thorllm entries found in shell configs."
 }
 
-# ── Main uninstall orchestrator ───────────────────────────────────────────────
 run_uninstall() {
     config_export
-
     confirm_uninstall
-
     stop_service
     remove_systemd
     remove_build
-    remove_thorllm
+    remove_thorllm_install
     remove_shellrc_entries
 
     step "Uninstall complete"
+    echo "thorllm has been fully removed."
     echo ""
-    echo -e "${GREEN}thorllm has been successfully uninstalled.${NC}"
-    echo ""
-    echo "  Note: You may need to reload your shell (e.g., 'exec $SHELL')"
-    echo "  to update your PATH environment variable."
+    echo "  Note: Run 'exec \$SHELL' to refresh your PATH."
     echo ""
 }

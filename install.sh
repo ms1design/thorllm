@@ -1,128 +1,149 @@
 #!/bin/bash
 # =============================================================================
-# thorllm — bootstrap installer
-# Works both as a web-pipe install AND as a local repo script:
+# thorllm — standalone web & local bootstrap installer
 #
-#   # From web (pipe mode — no local files available):
+# Web install (pipe mode — no local files needed):
 #   curl -fsSL https://raw.githubusercontent.com/ms1design/thorllm/main/install.sh | bash
 #
-#   # Local repo:
+# Local install from a cloned repo:
 #   bash install.sh
 #
 # Environment overrides:
-#   REPO_URL=https://github.com/your-fork/thorllm.git bash <(curl ...)
-#   INSTALL_DIR=~/my-thorllm bash <(curl ...)
-#   AUTO_SETUP=0   skip launching the wizard after install
+#   REPO_URL=https://github.com/your-fork/thorllm.git
+#   INSTALL_DIR=~/.local/share/thorllm
+#   BIN_DIR=~/.local/bin
+#   AUTO_SETUP=0   (skip auto-launching wizard)
+#   BRANCH=main    (branch/tag to clone)
 # =============================================================================
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/ms1design/thorllm.git}"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/share/thorllm}"
 BIN_DIR="${BIN_DIR:-${HOME}/.local/bin}"
+BRANCH="${BRANCH:-main}"
 
-# ── Detect whether we are running from a local file or piped from curl ────────
-# When piped through bash, BASH_SOURCE[0] is either unset or equals "bash".
-# We must NOT try to source any local files in that case.
+# ── Detect pipe mode vs local file mode ──────────────────────────────────────
+# In pipe mode (curl | bash), BASH_SOURCE[0] is unset or equals "bash".
+# We must never try to source local files in that case.
 _PIPE_MODE=1
-if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" && -f "${BASH_SOURCE[0]}" ]]; then
-    _LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    _PIPE_MODE=0
+_LOCAL_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" ]]; then
+    _candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [[ -f "${_candidate}/lib/common.sh" ]]; then
+        _LOCAL_DIR="${_candidate}"
+        _PIPE_MODE=0
+    fi
 fi
 
-# ── Minimal inline helpers (used before we have the full lib available) ───────
-_green='\033[38;2;118;185;0m'
-_cyan='\033[38;2;160;216;50m'
-_yellow='\033[1;33m'
-_red='\033[0;31m'
-_bold='\033[1m'
-_nc='\033[0m'
-
-_info()    { echo -e "${_cyan}[info]${_nc}  $*"; }
-_success() { echo -e "${_green}[ok]${_nc}    $*"; }
-_warn()    { echo -e "${_yellow}[warn]${_nc}  $*"; }
-_die()     { echo -e "${_red}[error]${_nc} $*" >&2; exit 1; }
+# ── Inline minimal helpers (used before we have the repo available) ───────────
+_i()  { echo "[info]  $*"; }
+_ok() { echo "[ok]    $*"; }
+_w()  { echo "[warn]  $*"; }
+_e()  { echo "[error] $*" >&2; exit 1; }
 
 _logo() {
-    echo -e "${_green}${_bold}"
     cat <<'LOGO'
+
   ▗ ▌     ▜ ▜    
   ▜▘▛▌▛▌▛▘▐ ▐ ▛▛▌
   ▐▖▌▌▙▌▌ ▐▖▐▖▌▌▌
+
 LOGO
-    echo -e "${_nc}"
 }
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
-command -v git  &>/dev/null || _die "git is required. Run: sudo apt-get install -y git"
-command -v curl &>/dev/null || _die "curl is required. Run: sudo apt-get install -y curl"
+command -v git  &>/dev/null || _e "git is required. Run: sudo apt-get install -y git"
+command -v curl &>/dev/null || _e "curl is required. Run: sudo apt-get install -y curl"
 
 _logo
-_info "Installing thorllm to ${INSTALL_DIR}…"
+_i "Installing thorllm to ${INSTALL_DIR} ..."
 echo ""
 
-# ── Clone or update the repo into INSTALL_DIR ────────────────────────────────
+# ── Clone or update repo ──────────────────────────────────────────────────────
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
-    _info "Updating existing install…"
-    git -C "${INSTALL_DIR}" pull --ff-only
-elif [[ "${_PIPE_MODE}" == "0" && "${_LOCAL_DIR}" == "${INSTALL_DIR}" ]]; then
-    # Running from inside the repo itself — nothing to clone
-    _info "Running from repo at ${INSTALL_DIR} — skipping clone."
+    _i "Updating existing install..."
+    git -C "${INSTALL_DIR}" fetch --quiet origin
+    git -C "${INSTALL_DIR}" reset --hard "origin/${BRANCH}" --quiet
+    _ok "Updated to latest ${BRANCH}"
+elif [[ "${_PIPE_MODE}" == "0" && "$(realpath "${_LOCAL_DIR}")" == "$(realpath "${INSTALL_DIR}" 2>/dev/null || echo __none__)" ]]; then
+    # Running from inside INSTALL_DIR itself — nothing to clone
+    _i "Running from repo at ${INSTALL_DIR} — skipping clone."
 else
-    # Fresh clone
-    _info "Cloning ${REPO_URL} → ${INSTALL_DIR}"
-    git clone --depth=1 "${REPO_URL}" "${INSTALL_DIR}"
+    _i "Cloning ${REPO_URL} (branch: ${BRANCH}) -> ${INSTALL_DIR}"
+    git clone --depth=1 --branch "${BRANCH}" "${REPO_URL}" "${INSTALL_DIR}"
+    _ok "Clone complete"
 fi
 
-# ── If running locally and INSTALL_DIR is different, copy lib/tui/etc ─────────
-# (handles: bash install.sh from a dev checkout into a separate INSTALL_DIR)
-if [[ "${_PIPE_MODE}" == "0" && "${_LOCAL_DIR}" != "${INSTALL_DIR}" ]]; then
-    _info "Copying repo files to ${INSTALL_DIR}…"
-    for d in lib tui patches templates bin; do
-        [[ -d "${_LOCAL_DIR}/${d}" ]] && cp -r "${_LOCAL_DIR}/${d}" "${INSTALL_DIR}/"
-    done
-    for f in VERSION; do
-        [[ -f "${_LOCAL_DIR}/${f}" ]] && cp "${_LOCAL_DIR}/${f}" "${INSTALL_DIR}/"
-    done
+# ── If running from a local dev checkout, sync files into INSTALL_DIR ─────────
+if [[ "${_PIPE_MODE}" == "0" && -n "${_LOCAL_DIR}" ]]; then
+    if [[ "$(realpath "${_LOCAL_DIR}")" != "$(realpath "${INSTALL_DIR}" 2>/dev/null || echo __none__)" ]]; then
+        _i "Syncing repo files from ${_LOCAL_DIR} -> ${INSTALL_DIR} ..."
+        for d in lib tui patches templates bin; do
+            [[ -d "${_LOCAL_DIR}/${d}" ]] && cp -r "${_LOCAL_DIR}/${d}" "${INSTALL_DIR}/"
+        done
+        cp "${_LOCAL_DIR}/VERSION" "${INSTALL_DIR}/" 2>/dev/null || true
+    fi
 fi
 
-# ── Verify lib/ exists (sanity check) ────────────────────────────────────────
-[[ -d "${INSTALL_DIR}/lib" ]] \
-    || _die "lib/ directory missing from ${INSTALL_DIR}. Clone may be incomplete."
+# ── Sanity check ──────────────────────────────────────────────────────────────
+[[ -d "${INSTALL_DIR}/lib" ]]       || _e "lib/ missing from ${INSTALL_DIR}"
+[[ -f "${INSTALL_DIR}/lib/common.sh" ]] || _e "lib/common.sh missing from ${INSTALL_DIR}"
+[[ -f "${INSTALL_DIR}/bin/thorllm" ]]   || _e "bin/thorllm missing from ${INSTALL_DIR}"
+[[ -f "${INSTALL_DIR}/tui/wizard.py" ]] || _e "tui/wizard.py missing from ${INSTALL_DIR}"
+
+# ── Now source the real shared libs from the freshly-installed repo ───────────
+# shellcheck source=lib/common.sh
+source "${INSTALL_DIR}/lib/common.sh"
+source "${INSTALL_DIR}/lib/config.sh"
+
+VERSION=$(cat "${INSTALL_DIR}/VERSION")
 
 # ── Install CLI symlink ───────────────────────────────────────────────────────
 chmod +x "${INSTALL_DIR}/bin/thorllm"
 mkdir -p "${BIN_DIR}"
 ln -sf "${INSTALL_DIR}/bin/thorllm" "${BIN_DIR}/thorllm"
+success "CLI symlink: ${BIN_DIR}/thorllm -> ${INSTALL_DIR}/bin/thorllm"
 
-# ── Ensure BIN_DIR is on PATH (current session + rc files) ───────────────────
+# ── PATH persistence ─────────────────────────────────────────────────────────
 export PATH="${BIN_DIR}:${PATH}"
 
 for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
-    if [[ -f "${rc}" ]] && ! grep -q "${BIN_DIR}" "${rc}" 2>/dev/null; then
-        echo "export PATH=\"${BIN_DIR}:\${PATH}\"" >> "${rc}"
-        _info "Added ${BIN_DIR} to PATH in ${rc}"
+    if [[ -f "${rc}" ]] && ! grep -qF "${BIN_DIR}" "${rc}" 2>/dev/null; then
+        printf '\n# thorllm\nexport PATH="%s:${PATH}"\n' "${BIN_DIR}" >> "${rc}"
+        info "Added ${BIN_DIR} to PATH in ${rc}"
     fi
 done
 
-# ── Optional: install TAB completion ─────────────────────────────────────────
-_completion_src="${INSTALL_DIR}/lib/completion.sh"
+# ── TAB completion ────────────────────────────────────────────────────────────
+_comp="${INSTALL_DIR}/lib/completion.sh"
 for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
     if [[ -f "${rc}" ]] && ! grep -q 'thorllm.*completion' "${rc}" 2>/dev/null; then
-        echo "# thorllm TAB completion" >> "${rc}"
-        echo "source \"${_completion_src}\"" >> "${rc}"
+        printf '\n# thorllm TAB completion\n[ -f "%s" ] && source "%s"\n' \
+            "${_comp}" "${_comp}" >> "${rc}"
     fi
 done
 
+# ── Check Python / Textual ───────────────────────────────────────────────────
+if command -v python3 &>/dev/null; then
+    if ! python3 -c "import textual" 2>/dev/null; then
+        warn "Textual TUI not found. Install with:"
+        warn "  pip install textual  (or: pip install textual --break-system-packages)"
+        warn "thorllm will use fallback plain prompts until then."
+    else
+        success "Textual TUI available"
+    fi
+else
+    warn "python3 not found — TUI setup wizard unavailable."
+fi
+
 echo ""
-_logo
-_success "thorllm CLI installed at ${BIN_DIR}/thorllm"
+usage_logo
+success "thorllm v${VERSION} installed at ${BIN_DIR}/thorllm"
 echo ""
-echo -e "  ${_green}Run the setup wizard:${_nc}  thorllm setup"
-echo -e "  ${_green}Or install directly:${_nc}   thorllm install"
-echo -e "  ${_green}Help:${_nc}                  thorllm --help"
-echo ""
-echo -e "  ${_cyan}TAB completion will be active in new shells.${_nc}"
-echo -e "  ${_cyan}To activate now: source ${_completion_src}${_nc}"
+echo "  Run the setup wizard:  thorllm setup"
+echo "  Or install directly:   thorllm install"
+echo "  Help:                  thorllm --help"
+echo "  TAB completion:        active in new shells"
 echo ""
 
 # ── Auto-launch wizard if interactive ────────────────────────────────────────

@@ -187,19 +187,39 @@ def _get(url: str, timeout: int = 5) -> Any:
 
 
 def fetch_vllm_versions() -> tuple[str, list[str]]:
-    data = _get("https://api.github.com/repos/vllm-project/vllm/releases?per_page=6")
-    versions = [r.get("tag_name", "").lstrip("v") for r in (data or []) if r.get("tag_name")]
-    versions = [v for v in versions if v][:5]
-    latest = versions[0] if versions else "unknown"
-    return latest, versions
+    """Return (latest_stable, [recent_stable...]).
+    GitHub releases API first, PyPI as fallback."""
+    data = _get("https://api.github.com/repos/vllm-project/vllm/releases?per_page=20")
+    if data and isinstance(data, list):
+        stable = [
+            r.get("tag_name", "").lstrip("v")
+            for r in data
+            if not r.get("prerelease", False)
+            and not r.get("draft", False)
+            and r.get("tag_name", "")
+        ]
+        stable = [v for v in stable if v][:8]
+        if stable:
+            return stable[0], stable
+    # PyPI fallback
+    pypi = _get("https://pypi.org/pypi/vllm/json")
+    if pypi:
+        all_v = sorted(pypi.get("releases", {}).keys(), reverse=True)
+        stable = [v for v in all_v
+                  if all(x not in v for x in ("rc","dev","a","b","post"))][:8]
+        if stable:
+            return stable[0], stable
+    return "unknown", []
 
 
 def fetch_torch_versions() -> tuple[str, list[str]]:
+    """Return (latest_stable, [recent_stable...]) PyTorch versions."""
     data = _get("https://pypi.org/pypi/torch/json")
     if not data:
         return "2.10.0", ["2.10.0", "2.9.1", "2.8.0"]
-    releases = sorted(data.get("releases", {}).keys(), reverse=True)
-    stable = [v for v in releases if all(x not in v for x in ("rc", "dev", "a", "b", "post"))][:5]
+    all_v = sorted(data.get("releases", {}).keys(), reverse=True)
+    stable = [v for v in all_v
+              if all(x not in v for x in ("rc","dev","a","b","post"))][:8]
     return (stable[0] if stable else "2.10.0"), stable
 
 

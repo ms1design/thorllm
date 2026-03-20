@@ -22,19 +22,19 @@ model_list() {
         | cut -d= -f2 || echo "${SERVE_MODEL}")
 
     usage_logo
-    echo -e "  ${BOLD}Available models${NC}  (${MUTED}${MODELS_DIR}${NC})"
+    echo -e "  Available models  (${MODELS_DIR})"
     echo ""
     if [[ ! -d "${MODELS_DIR}" ]] || [[ -z "$(ls -A "${MODELS_DIR}" 2>/dev/null)" ]]; then
-        echo -e "  ${MUTED}(none — run: thorllm model add <org/name>)${NC}"
+        echo -e "  (none — run: thorllm model add <org/name>)"
     else
         find "${MODELS_DIR}" -name "*.yaml" ! -path "*/example/*" \
             | sort \
             | while read -r f; do
                 local rel; rel=$(realpath --relative-to="${MODELS_DIR}" "${f}" | sed 's/\.yaml$//')
                 if [[ "${rel}" == "${active}" ]]; then
-                    printf "  ${NVIDIA_GREEN}● %-40s${NC} ${MUTED}(active)${NC}\n" "${rel}"
+                    printf "  ● %-40s (active)\n" "${rel}"
                 else
-                    printf "  ${MUTED}○${NC} %s\n" "${rel}"
+                    printf "  ○ %s\n" "${rel}"
                 fi
             done
     fi

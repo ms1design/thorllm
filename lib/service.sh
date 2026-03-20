@@ -20,7 +20,7 @@ _follow_until_ready() {
 
     echo ""
     step "Following vLLM startup logs  (Ctrl-C to detach)"
-    echo -e "${MUTED}  Waiting for http://localhost:${port}/v1/health …${NC}"
+    echo -e "  Waiting for http://localhost:${port}/v1/health …"
     echo ""
 
     # Stream logs in background
@@ -38,22 +38,22 @@ _follow_until_ready() {
             echo ""
             step "vLLM is ready"
             echo ""
-            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "Status:"       "● Running"
-            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "API endpoint:" "http://localhost:${port}/v1"
-            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "Health:"       "http://localhost:${port}/v1/health"
-            printf "  ${NVIDIA_GREEN}%-18s${NC} %s\n" "Active model:" "${SERVE_MODEL}"
+            printf "  %-18s %s\n" "Status:"       "● Running"
+            printf "  %-18s %s\n" "API endpoint:" "http://localhost:${port}/v1"
+            printf "  %-18s %s\n" "Health:"       "http://localhost:${port}/v1/health"
+            printf "  %-18s %s\n" "Active model:" "${SERVE_MODEL}"
             echo ""
-            echo -e "  ${MUTED}Useful commands:${NC}"
-            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm logs -f"     "stream live logs"
-            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm status"      "service status"
-            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm stop"        "stop the service"
-            printf "  ${CYAN}%-28s${NC} %s\n" "thorllm kill"        "force-kill vLLM process"
+            echo -e "  Useful commands:"
+            printf "  %-28s %s\n" "thorllm logs -f"     "stream live logs"
+            printf "  %-28s %s\n" "thorllm status"      "service status"
+            printf "  %-28s %s\n" "thorllm stop"        "stop the service"
+            printf "  %-28s %s\n" "thorllm kill"        "force-kill vLLM process"
             echo ""
             print_footer
             return 0
         fi
 
-        printf "\r${NVIDIA_GREEN}${frames[$((fi % 6))]}${NC}  Waiting for vLLM … %ds elapsed" "${elapsed}"
+        printf "\r${frames[$((fi % 6))]}  Waiting for vLLM … %ds elapsed" "${elapsed}"
         (( fi++ )); sleep "${interval}"; (( elapsed += interval ))
     done
 
@@ -99,7 +99,7 @@ write_service_files() {
     render_template "${TPL_DIR}/vllm.service" "/tmp/vllm.service.rendered" "${svc_vars}"
 
     echo ""
-    echo -e "${YELLOW}[sudo]${NC} Installing systemd service unit requires root access."
+    echo -e "[sudo] Installing systemd service unit requires root access."
     echo -e "       Destination: ${SERVICE_FILE}"
     sudo cp "/tmp/vllm.service.rendered" "${SERVICE_FILE}"
     rm -f "/tmp/vllm.service.rendered"
@@ -107,7 +107,7 @@ write_service_files() {
     # sudoers rule for cache-drop without password
     local sudoers_file="/etc/sudoers.d/vllm-drop-caches"
     echo ""
-    echo -e "${YELLOW}[sudo]${NC} Creating sudoers rule so vLLM can drop page cache."
+    echo -e "[sudo] Creating sudoers rule so vLLM can drop page cache."
     echo -e "       This avoids OOM errors on model reload — no persistent privilege."
     echo -e "       File: ${sudoers_file}"
     echo "${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches" \
@@ -176,7 +176,7 @@ service_ctl() {
         start)
             step "Starting ${SERVICE_NAME}"
             echo ""
-            echo -e "${YELLOW}[sudo]${NC} Starting systemd service requires elevated privileges."
+            echo -e "[sudo] Starting systemd service requires elevated privileges."
             sudo systemctl start "${SERVICE_NAME}"
             _follow_until_ready
             ;;

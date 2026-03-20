@@ -257,24 +257,59 @@ create_cache_dirs() {
         "${CACHE_ROOT}/huggingface"
 }
 
-# ── NVFP4 patches ────────────────────────────────────────────────────────────
+# ── NVFP4 patches — registry-driven ─────────────────────────────────────────
+#
+# Each patch script is self-guarding: it detects the installed vLLM version
+# at runtime and skips itself when the fix is already in upstream code.
+# The registry (patches/registry.yaml) documents which ranges each patch
+# targets, but the Python scripts are the authoritative gate.
+# ──────────────────────────────────────────────────────────────────────────────
 apply_nvfp4_patches() {
-    step "NVFP4 patches (SM110 + layernorm)"
+    step "NVFP4 patches"
 
     local patch_dir="${LIB_DIR}/../patches"
     local venv_python="${VENV_PATH}/bin/python"
 
-    if [[ ! -f "${patch_dir}/patch_sm110.py" ]]; then
-        warn "Patch scripts not found at ${patch_dir} — skipping NVFP4 patches."
-        warn "Clone the full thorllm repo to get patches/."
+    if [[ ! -d "${patch_dir}" ]]; then
+        warn "patches/ directory not found at ${patch_dir} — skipping."
+        warn "Ensure you cloned the full thorllm repo."
         return
     fi
 
-    info "Applying SM110 capability family patch (enables CUTLASS NVFP4 on Thor)…"
-    "${venv_python}" "${patch_dir}/patch_sm110.py"         && success "SM110 patch applied."         || warn "SM110 patch failed — NVFP4 will fall back to Marlin (slower)."
+    # Resolve the installed vLLM version once (used for logging only;
+    # each patch script does its own version check internally).
+    local vllm_ver
+    vllm_ver=$(
+        "${venv_python}" -c \
+            "import importlib.metadata; print(importlib.metadata.version('vllm'))" \
+            2>/dev/null || echo "unknown"
+    )
+    info "Installed vLLM: ${vllm_ver}"
+    info "Patch registry: ${patch_dir}/registry.yaml"
 
-    info "Applying RMSNormGated layernorm patch…"
-    "${venv_python}" "${patch_dir}/patch_layernorm.py"         && success "Layernorm patch applied."         || warn "Layernorm patch failed — NVFP4 gated-activation models may fail to load."
+    # ── SM110 patch ──────────────────────────────────────────────────────────
+    if [[ -f "${patch_dir}/patch_sm110.py" ]]; then
+        info "Running patch_sm110 (CUTLASS NVFP4 on Jetson Thor SM110)..."
+        if "${venv_python}" "${patch_dir}/patch_sm110.py"; then
+            success "patch_sm110: complete"
+        else
+            warn "patch_sm110 failed — NVFP4 will fall back to Marlin (slower)."
+        fi
+    else
+        warn "patch_sm110.py not found — skipping."
+    fi
+
+    # ── Layernorm patch ──────────────────────────────────────────────────────
+    if [[ -f "${patch_dir}/patch_layernorm.py" ]]; then
+        info "Running patch_layernorm (RMSNormGated activation attribute)..."
+        if "${venv_python}" "${patch_dir}/patch_layernorm.py"; then
+            success "patch_layernorm: complete"
+        else
+            warn "patch_layernorm failed — NVFP4 gated-activation models may error on load."
+        fi
+    else
+        warn "patch_layernorm.py not found — skipping."
+    fi
 }
 
 # ── Tiktoken encoding pre-fetch ───────────────────────────────────────────────
@@ -358,38 +393,38 @@ run_install() {
     echo ""
     step "Installation complete"
     echo ""
-    echo -e "  ${NVIDIA_GREEN}What was installed:${NC}"
-    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "vLLM:"         "${installed_vllm}"
-    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "PyTorch:"      "${installed_torch}"
-    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "Model config:" "${SERVE_MODEL}"
-    printf "  ${MUTED}%-22s${NC}${NVIDIA_GREEN}%s${NC}\n" "Installed to:" "${BUILD_PATH}"
+    echo -e "  What was installed:"
+    printf "  %-22s%s\n" "vLLM:"         "${installed_vllm}"
+    printf "  %-22s%s\n" "PyTorch:"      "${installed_torch}"
+    printf "  %-22s%s\n" "Model config:" "${SERVE_MODEL}"
+    printf "  %-22s%s\n" "Installed to:" "${BUILD_PATH}"
     echo ""
-    echo -e "  ${NVIDIA_GREEN}Next steps:${NC}"
+    echo -e "  Next steps:"
     echo ""
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "source ${BUILD_PATH}/activate_vllm.sh" \
         "activate the vLLM environment in current shell"
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "thorllm start" \
         "start the vLLM API server (follows logs until ready)"
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "thorllm start --port 9000" \
         "start on a custom port"
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "thorllm logs -f" \
         "stream live logs at any time"
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "thorllm model select" \
         "interactive model switcher (TUI)"
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "thorllm stop" \
         "gracefully stop the service"
-    printf "  ${CYAN}%-36s${NC} %s\n" \
+    printf "  %-36s %s\n" \
         "thorllm kill" \
         "force-kill and free GPU memory"
     echo ""
-    echo -e "  ${MUTED}The API will be available at: http://localhost:${VLLM_PORT:-8000}/v1${NC}"
-    echo -e "  ${MUTED}Enable TAB completion:        thorllm completion${NC}"
+    echo -e "  The API will be available at: http://localhost:${VLLM_PORT:-8000}/v1"
+    echo -e "  Enable TAB completion:        thorllm completion"
     echo ""
     print_footer
 }
