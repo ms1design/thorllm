@@ -6,7 +6,7 @@
     },
     {
       "name": "user-config",
-      "path": "~/thorllm"
+      "path": "../../../thorllm"
     }
   ],
   "settings": {}
