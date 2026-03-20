@@ -13,6 +13,7 @@ SERVICE_NAME="${SERVICE_NAME:-vllm}"
 SERVICE_USER="${SERVICE_USER:-$(whoami)}"
 SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/${SERVICE_NAME}.service}"
 SERVE_MODEL="${SERVE_MODEL:-openai/gpt-oss-120b}"
+VLLM_PORT="${VLLM_PORT:-8000}"
 
 # NVFP4 / SM110 specifics
 # SM110 patch enables the CUTLASS FP4 backend on Thor (40-60% faster than Marlin fallback).
@@ -32,8 +33,12 @@ CUDSS_VERSION="${CUDSS_VERSION:-0.7.1}"
 # Derived paths (computed, not stored in config)
 VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
 MODELS_DIR="${BUILD_PATH}/models"
-TPL_DIR="${TPL_DIR:-${HOME}/.local/share/thorllm/templates}"
-THORLLM_LIB="${THORLLM_LIB:-${HOME}/.local/share/thorllm/lib}"
+# TPL_DIR and THORLLM_LIB are resolved relative to the running script (SELF_DIR/LIB_DIR)
+# when available, falling back to the canonical install location.
+_THORLLM_SHARE="${HOME}/.local/share/thorllm"
+TPL_DIR="${TPL_DIR:-${SELF_DIR:+${SELF_DIR}/templates}}"
+TPL_DIR="${TPL_DIR:-${_THORLLM_SHARE}/templates}"
+THORLLM_LIB="${LIB_DIR:-${THORLLM_LIB:-${_THORLLM_SHARE}/lib}}"
 
 # ── Load config from file ─────────────────────────────────────────────────────
 config_load() {
@@ -77,18 +82,23 @@ CONF
 # ── Show current config ───────────────────────────────────────────────────────
 config_show() {
     echo ""
-    echo -e "${BOLD}Current configuration:${NC}"
+    echo -e "Current configuration:"
     echo ""
-    printf "  %-30s %s\n" "BUILD_PATH"        "${BUILD_PATH}"
-    printf "  %-30s %s\n" "CACHE_ROOT"        "${CACHE_ROOT}"
-    printf "  %-30s %s\n" "CUDA_HOME"         "${CUDA_HOME}"
-    printf "  %-30s %s\n" "TORCH_CUDA_ARCH"   "${TORCH_CUDA_ARCH}"
-    printf "  %-30s %s\n" "SERVICE_USER"      "${SERVICE_USER}"
-    printf "  %-30s %s\n" "SERVE_MODEL"       "${SERVE_MODEL}"
-    printf "  %-30s %s\n" "VLLM_VERSION"      "${VLLM_VERSION:-auto}"
-    printf "  %-30s %s\n" "TORCH_VERSION"     "${TORCH_VERSION}"
-    printf "  %-30s %s\n" "FLASHINFER_VERSION" "${FLASHINFER_VERSION:-auto}"
-    printf "  %-30s %s\n" "HF_TOKEN"          "${HF_TOKEN:+(set)}"
+    printf "  %-30s%s\n" "BUILD_PATH"        "${BUILD_PATH}"
+    printf "  %-30s%s\n" "CACHE_ROOT"        "${CACHE_ROOT}"
+    printf "  %-30s%s\n" "CUDA_HOME"         "${CUDA_HOME}"
+    printf "  %-30s%s\n" "TORCH_CUDA_ARCH"   "${TORCH_CUDA_ARCH}"
+    printf "  %-30s%s\n" "SERVICE_USER"      "${SERVICE_USER}"
+    printf "  %-30s%s\n" "SERVE_MODEL"       "${SERVE_MODEL}"
+    printf "  %-30s%s\n" "VLLM_PORT"         "${VLLM_PORT:-8000}"
+    printf "  %-30s%s\n" "VLLM_VERSION"      "${VLLM_VERSION:-auto}"
+    printf "  %-30s%s\n" "TORCH_VERSION"     "${TORCH_VERSION}"
+    printf "  %-30s%s\n" "TORCHVISION_VERSION" "${TORCHVISION_VERSION}"
+    printf "  %-30s%s\n" "TORCHAUDIO_VERSION"  "${TORCHAUDIO_VERSION}"
+    printf "  %-30s%s\n" "FLASHINFER_VERSION" "${FLASHINFER_VERSION:-auto}"
+    printf "  %-30s%s\n" "NUMBA_VERSION"      "${NUMBA_VERSION}"
+    printf "  %-30s%s\n" "CUDSS_VERSION"      "${CUDSS_VERSION}"
+    printf "  %-30s%s\n" "HF_TOKEN"           "${HF_TOKEN:+(set)}"
     echo ""
 }
 

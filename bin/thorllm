@@ -1,37 +1,38 @@
 #!/bin/bash
 # =============================================================================
-# vllm-thor — CLI entry point
-# Usage: vllm-thor <command> [options]
+# thorllm — CLI entry point
+# Usage: thorllm <command> [options]
 # =============================================================================
 set -euo pipefail
 
-SELF_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"
+SELF_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.."; pwd)"
 LIB_DIR="${SELF_DIR}/lib"
 TPL_DIR="${SELF_DIR}/templates"
+export SELF_DIR LIB_DIR TPL_DIR
 
 # shellcheck source=lib/common.sh
 source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/config.sh"
 
-# ── Load VERSION file (auto) or env (manual override) ────────────────────────
+# ── Load VERSION ──────────────────────────────────────────────────────────────
 VERSION=$(cat "${SELF_DIR}/VERSION")
 
-VENV_PATH="${VENV_PATH:-${BUILD_PATH:-~/vllm-thor}/.venv}"
+VENV_PATH="${VENV_PATH:-${BUILD_PATH:-~/thorllm}/.vllm}"
 if [[ -x "${VENV_PATH}/bin/python" ]]; then
-    VLLM_VERSION=$("${VENV_PATH}/bin/python" -c "import importlib.metadata as m; print(m.version('vllm'))" 2>/dev/null || echo "")
+    VLLM_VERSION_INSTALLED=$(
+        "${VENV_PATH}/bin/python" -c \
+            "import importlib.metadata as m; print(m.version('vllm'))" 2>/dev/null || echo ""
+    )
 fi
 
+# ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
-    echo ""
-    echo ""
     usage_logo
-    echo ""
-    echo ""
     cat <<EOF
-vllm-thor ${VERSION} — vLLM${VLLM_VERSION:+ ${VLLM_VERSION}} manager for NVIDIA Jetson Thor
+thorllm ${VERSION}${VLLM_VERSION_INSTALLED:+ — vLLM ${VLLM_VERSION_INSTALLED}} — vLLM manager for NVIDIA Jetson Thor
 
 Usage:
-  vllm-thor <command> [options]
+  thorllm <command> [options]
 
 Install:
   setup                  Interactive TUI setup wizard
@@ -39,19 +40,21 @@ Install:
   install --update       Update vLLM to latest version
 
 Service:
-  start                  Start the vLLM service
+  start [-p PORT]        Start the vLLM service
+  start --port PORT      Start on a custom port (default: 8000)
   stop                   Stop the vLLM service
-  restart                Restart the vLLM service
+  restart [-p PORT]      Restart the vLLM service
   status                 Show service status
+  kill                   Force-kill vLLM and free GPU memory
   logs [-f]              Show service logs (use -f to follow)
 
 Models:
   model list             List available model configs
   model add <org/name>   Create a new model config from template
-  model switch <org/name> Switch the active model
-  model select           Interactive model selection
-  model show <org/name>  Print the model config YAML
-  model edit <org/name>  Open model config in \$EDITOR
+  model switch <name>    Switch the active model
+  model select           Interactive model selection (TUI)
+  model show <name>      Print the model config YAML
+  model edit <name>      Open model config in \$EDITOR
 
 Info:
   version                Show installed vLLM and dependency versions
@@ -59,25 +62,28 @@ Info:
 
 System:
   uninstall              Remove thorllm and all installed components
+  completion             Print TAB-completion setup instructions
 
 Options:
   -h, --help             Show this help
   --no-color             Disable colour output
-  --build-path <path>    Override BUILD_PATH (default: ~/vllm-thor)
+  --build-path <path>    Override BUILD_PATH (default: ~/thorllm)
+  -p, --port <port>      Port for vLLM API server (used with start/restart)
 
 Environment:
-  BUILD_PATH             Installation directory  (default: ~/vllm-thor)
+  BUILD_PATH             Installation directory  (default: ~/thorllm)
   CACHE_ROOT             Cache root directory    (default: ~/.cache/vllm)
   SERVE_MODEL            Active model            (default: openai/gpt-oss-120b)
+  VLLM_PORT              API port                (default: 8000)
   HF_TOKEN               HuggingFace access token
-  REPO_URL               vllm-thor repo URL (for updates)
 
 Examples:
-  vllm-thor setup
-  vllm-thor model add Qwen/Qwen3-VL-32B-Instruct
-  vllm-thor model switch Qwen/Qwen3-VL-32B-Instruct
-  vllm-thor restart
-  vllm-thor logs -f
+  thorllm setup
+  thorllm start --port 9000
+  thorllm model add Qwen/Qwen3-VL-32B-Instruct
+  thorllm model select
+  thorllm logs -f
+  thorllm kill
 EOF
 }
 
@@ -85,31 +91,40 @@ EOF
 [[ $# -eq 0 ]] && { usage; exit 0; }
 
 FOLLOW_LOGS=0
+UPDATE=0
+CMD=""
+SUBCMD=""
+MODEL_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help)     usage; exit 0 ;;
-        --no-color)    NO_COLOR=1; shift ;;
-        --build-path)  BUILD_PATH="$2"; shift 2 ;;
-        --update)      UPDATE=1; shift ;;
-        -f)            FOLLOW_LOGS=1; shift ;;
-        setup)         CMD=setup; shift ;;
-        install)       CMD=install; shift ;;
-        start)         CMD=start; shift ;;
-        stop)          CMD=stop; shift ;;
-        restart)       CMD=restart; shift ;;
-        status)        CMD=status; shift ;;
-        logs)          CMD=logs; shift ;;
+        -h|--help)      usage; exit 0 ;;
+        --no-color)     NO_COLOR=1; shift ;;
+        --build-path)   BUILD_PATH="$2"; shift 2 ;;
+        --update)       UPDATE=1; shift ;;
+        -f)             FOLLOW_LOGS=1; shift ;;
+        -p|--port)
+            export VLLM_PORT="$2"; shift 2 ;;
+        setup)          CMD=setup; shift ;;
+        install)        CMD=install; shift ;;
+        start)          CMD=start; shift ;;
+        stop)           CMD=stop; shift ;;
+        restart)        CMD=restart; shift ;;
+        status)         CMD=status; shift ;;
+        kill)           CMD=kill; shift ;;
+        logs)           CMD=logs; shift ;;
         model)
             CMD=model
             SUBCMD="${2:-}"
             MODEL_ARG="${3:-}"
-            shift; [[ $# -gt 0 ]] && shift; [[ $# -gt 0 ]] && shift
+            shift; [[ $# -gt 0 ]] && shift || true
+            [[ $# -gt 0 && ! "$1" =~ ^- ]] && { MODEL_ARG="$1"; shift; } || true
             ;;
-        version)       CMD=version; shift ;;
-        config)        CMD=config_show; shift ;;
-        uninstall)     CMD=uninstall; shift ;;
-        *)             die "Unknown command: $1. Run 'vllm-thor --help'" ;;
+        version)        CMD=version; shift ;;
+        config)         CMD=config_show; shift ;;
+        uninstall)      CMD=uninstall; shift ;;
+        completion)     CMD=completion; shift ;;
+        *)              die "Unknown command: $1. Run 'thorllm --help'" ;;
     esac
 done
 
@@ -121,11 +136,15 @@ case "${CMD:-}" in
         ;;
     install)
         source "${LIB_DIR}/install.sh"
-        run_install "${UPDATE:-0}"
+        run_install "${UPDATE}"
         ;;
     start|stop|restart|status)
         source "${LIB_DIR}/service.sh"
         service_ctl "${CMD}"
+        ;;
+    kill)
+        source "${LIB_DIR}/service.sh"
+        service_kill
         ;;
     logs)
         source "${LIB_DIR}/service.sh"
@@ -135,17 +154,37 @@ case "${CMD:-}" in
         source "${LIB_DIR}/model.sh"
         case "${SUBCMD:-}" in
             list)   model_list ;;
-            add)    [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model add <org/name>"
-                    model_add "${MODEL_ARG}" ;;
-            switch) [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model switch <org/name>"
-                    model_switch "${MODEL_ARG}" ;;
-            show)   [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model show <org/name>"
-                    model_show "${MODEL_ARG}" ;;
-            edit)   [[ -z "${MODEL_ARG}" ]] && die "Usage: vllm-thor model edit <org/name>"
-                    model_edit "${MODEL_ARG}" ;;
-            select) [[ -z "${MODEL_ARG}" ]] && { source "${SELF_DIR}/tui/wizard.sh"; _model_select_interactive; }
-                    die "Usage: vllm-thor model select" ;;
-            *)      die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch show edit select" ;;
+            add)
+                [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model add <org/name>"
+                model_add "${MODEL_ARG}" ;;
+            switch)
+                [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model switch <org/name>"
+                model_switch "${MODEL_ARG}" ;;
+            show)
+                [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model show <org/name>"
+                model_show "${MODEL_ARG}" ;;
+            edit)
+                [[ -z "${MODEL_ARG}" ]] && die "Usage: thorllm model edit <org/name>"
+                model_edit "${MODEL_ARG}" ;;
+            select)
+                source "${SELF_DIR}/tui/wizard.sh"
+                _model_select_interactive ;;
+            *)
+                if [[ -n "${SUBCMD:-}" ]]; then
+                    die "Unknown model subcommand: '${SUBCMD}'. Options: list add switch select show edit"
+                fi
+                # No subcommand — show model usage
+                echo ""
+                echo "Usage: thorllm model <subcommand> [arg]"
+                echo ""
+                echo "  list               List available model configs"
+                echo "  add <org/name>     Create a new model config"
+                echo "  switch <org/name>  Switch the active model"
+                echo "  select             Interactive model selection (TUI)"
+                echo "  show <org/name>    Print model config YAML"
+                echo "  edit <org/name>    Open model config in \$EDITOR"
+                echo ""
+                ;;
         esac
         ;;
     version)
@@ -159,6 +198,10 @@ case "${CMD:-}" in
     uninstall)
         source "${LIB_DIR}/uninstall.sh"
         run_uninstall
+        ;;
+    completion)
+        source "${LIB_DIR}/completion.sh"
+        thorllm_completion_install_hint
         ;;
     *)
         usage; exit 1

@@ -6,6 +6,13 @@ __pycache__/
 # C extensions
 *.so
 
+# thorllm user files
+models/
+activate_vllm.sh
+thorllm.conf
+vllm-serve.sh
+vllm.env
+
 # Distribution / packaging
 .Python
 build/

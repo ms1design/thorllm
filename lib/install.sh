@@ -257,24 +257,119 @@ create_cache_dirs() {
         "${CACHE_ROOT}/huggingface"
 }
 
-# ── NVFP4 patches ────────────────────────────────────────────────────────────
-apply_nvfp4_patches() {
-    step "NVFP4 patches (SM110 + layernorm)"
+# ── NVFP4 patches — registry-driven ─────────────────────────────────────────
+apply_vllm_patches() {
+    step "NVFP4 patches"
 
     local patch_dir="${LIB_DIR}/../patches"
+    local registry_file="${patch_dir}/registry.yaml"
     local venv_python="${VENV_PATH}/bin/python"
 
-    if [[ ! -f "${patch_dir}/patch_sm110.py" ]]; then
-        warn "Patch scripts not found at ${patch_dir} — skipping NVFP4 patches."
-        warn "Clone the full thorllm repo to get patches/."
+    if [[ ! -d "${patch_dir}" ]]; then
+        warn "patches/ directory not found at ${patch_dir} — skipping."
+        warn "Ensure you cloned the full thorllm repo."
         return
     fi
 
-    info "Applying SM110 capability family patch (enables CUTLASS NVFP4 on Thor)…"
-    "${venv_python}" "${patch_dir}/patch_sm110.py"         && success "SM110 patch applied."         || warn "SM110 patch failed — NVFP4 will fall back to Marlin (slower)."
+    if [[ ! -f "${registry_file}" ]]; then
+        warn "Registry file not found: ${registry_file} — skipping patch application."
+        return
+    fi
 
-    info "Applying RMSNormGated layernorm patch…"
-    "${venv_python}" "${patch_dir}/patch_layernorm.py"         && success "Layernorm patch applied."         || warn "Layernorm patch failed — NVFP4 gated-activation models may fail to load."
+    local vllm_ver
+    vllm_ver=$(
+        "${venv_python}" -c \
+            "import importlib.metadata; print(importlib.metadata.version('vllm'))" \
+            2>/dev/null || echo "unknown"
+    )
+    info "Installed vLLM: ${vllm_ver}"
+    info "Patch registry: ${registry_file}"
+
+    local patches_applied=0
+    local patches_skipped=0
+
+    while IFS='|' read -r patch_name range_spec patch_file; do
+        [[ -z "${patch_name}" ]] && continue
+        
+        local should_apply=false
+
+        if [[ -n "${range_spec}" ]]; then
+            if "${venv_python}" -c "
+import re
+
+vllm_ver = '${vllm_ver}'
+range_spec = '${range_spec}'
+
+def version_tuple(v):
+    return tuple(map(int, v.split('.')))
+
+min_ver = None
+max_ver = None
+
+matches = re.findall(r'>=([0-9]+\.[0-9]+\.[0-9]+)', range_spec)
+if matches:
+    min_ver = matches[0]
+
+matches = re.findall(r'<([0-9]+\.[0-9]+\.[0-9]+)', range_spec)
+if matches:
+    max_ver = matches[0]
+
+v = version_tuple(vllm_ver)
+
+if min_ver and v < version_tuple(min_ver):
+    exit(1)
+
+if max_ver and v >= version_tuple(max_ver):
+    exit(1)
+
+exit(0)
+"; then
+                should_apply=true
+            else
+                info "  Skipping ${patch_name} (v${vllm_ver} outside range: ${range_spec})"
+                ((patches_skipped++))
+            fi
+        else
+            should_apply=true
+        fi
+
+        if [[ "${should_apply}" == "true" && -f "${patch_dir}/${patch_file}" ]]; then
+            info "Applying ${patch_name}..."
+            if "${venv_python}" "${patch_dir}/${patch_file}"; then
+                success "${patch_name}: complete"
+                ((patches_applied++))
+            else
+                warn "${patch_name} failed"
+                ((patches_skipped++))
+            fi
+        elif [[ "${should_apply}" == "true" && ! -f "${patch_dir}/${patch_file}" ]]; then
+            warn "${patch_name}: patch file not found (${patch_file}) — skipping"
+            ((patches_skipped++))
+        fi
+    done < <(
+        "${venv_python}" -c "
+import yaml
+
+registry_file = '${registry_file}'
+with open(registry_file, 'r') as f:
+    data = yaml.safe_load(f)
+
+patches = data.get('patches', {})
+for name, info in patches.items():
+    applies_to = info.get('applies_to', {})
+    for range_spec, should_apply in applies_to.items():
+        if should_apply:
+            patch_file = name + '.py'
+            print(f'{name}|{range_spec}|{patch_file}')
+            break
+"
+    )
+
+    if [[ ${patches_applied} -gt 0 || ${patches_skipped} -gt 0 ]]; then
+        info "Patch application summary: ${patches_applied} applied, ${patches_skipped} skipped"
+    else
+        info "No patches to apply from registry"
+    fi
 }
 
 # ── Tiktoken encoding pre-fetch ───────────────────────────────────────────────
@@ -329,10 +424,7 @@ run_install() {
     source "${LIB_DIR}/validate.sh"
     run_validate
 
-    # Apply NVFP4 patches if enabled (default: yes)
-    if [[ "${NVFP4_ENABLE:-1}" == "1" ]]; then
-        apply_nvfp4_patches
-    fi
+    apply_vllm_patches
 
     prefetch_tiktoken
 
@@ -344,10 +436,51 @@ run_install() {
 
     config_save
 
+    # Resolve final installed versions for summary
+    local installed_vllm installed_torch
+    installed_vllm=$(
+        "${VENV_PATH}/bin/python" -c \
+            "import importlib.metadata as m; print(m.version('vllm'))" 2>/dev/null || echo "${VLLM_VERSION:-unknown}"
+    )
+    installed_torch=$(
+        "${VENV_PATH}/bin/python" -c \
+            "import torch; print(torch.__version__)" 2>/dev/null || echo "${TORCH_VERSION:-unknown}"
+    )
+
+    echo ""
     step "Installation complete"
     echo ""
-    echo "  Activate:    source ${BUILD_PATH}/activate_vllm.sh"
-    echo "  Start:       thorllm start"
-    echo "  Watch logs:  thorllm logs -f"
+    echo -e "  What was installed:"
+    printf "  %-22s%s\n" "vLLM:"         "${installed_vllm}"
+    printf "  %-22s%s\n" "PyTorch:"      "${installed_torch}"
+    printf "  %-22s%s\n" "Model config:" "${SERVE_MODEL}"
+    printf "  %-22s%s\n" "Installed to:" "${BUILD_PATH}"
+    echo ""
+    echo -e "  Next steps:"
+    echo ""
+    printf "  %-36s %s\n" \
+        "source ${BUILD_PATH}/activate_vllm.sh" \
+        "activate the vLLM environment in current shell"
+    printf "  %-36s %s\n" \
+        "thorllm start" \
+        "start the vLLM API server (follows logs until ready)"
+    printf "  %-36s %s\n" \
+        "thorllm start --port 9000" \
+        "start on a custom port"
+    printf "  %-36s %s\n" \
+        "thorllm logs -f" \
+        "stream live logs at any time"
+    printf "  %-36s %s\n" \
+        "thorllm model select" \
+        "interactive model switcher (TUI)"
+    printf "  %-36s %s\n" \
+        "thorllm stop" \
+        "gracefully stop the service"
+    printf "  %-36s %s\n" \
+        "thorllm kill" \
+        "force-kill and free GPU memory"
+    echo ""
+    echo -e "  The API will be available at: http://localhost:${VLLM_PORT:-8000}/v1"
+    echo -e "  Enable TAB completion:        thorllm completion"
     echo ""
 }

@@ -1,185 +1,185 @@
 #!/bin/bash
-# tui/wizard.sh — interactive setup wizard using whiptail
-# Sources: common.sh, config.sh, install.sh, service.sh, model.sh
+# tui/wizard.sh — interactive setup wizard bridge
+# Launches the Python Textual TUI (tui/wizard.py) and reads back JSON config.
+# Falls back to basic interactive prompts if Python/Textual is not available.
+# Note: wizard.py contains the actual TUI implementation; this is just the launcher.
 # =============================================================================
 
-# ── whiptail wrapper helpers ──────────────────────────────────────────────────
-_wt_input() {
-    # _wt_input "Title" "Prompt" "default"  →  stdout: user value
-    local title="$1" prompt="$2" default="$3"
-    whiptail --title "${title}" --inputbox "${prompt}" 10 70 "${default}" 3>&1 1>&2 2>&3
+_TUI_PY="${SELF_DIR}/tui/wizard.py"
+
+# ── Check Textual availability ────────────────────────────────────────────────
+_has_textual() {
+    python3 -c "import textual" 2>/dev/null
 }
 
-_wt_password() {
-    local title="$1" prompt="$2"
-    whiptail --title "${title}" --passwordbox "${prompt}" 10 70 "" 3>&1 1>&2 2>&3
+# ── Collect current config as JSON for the TUI ────────────────────────────────
+_build_defaults_json() {
+    python3 -c "
+import json, sys
+d = {
+    'BUILD_PATH':    '${BUILD_PATH}',
+    'CACHE_ROOT':    '${CACHE_ROOT}',
+    'VLLM_VERSION':  '${VLLM_VERSION}',
+    'TORCH_VERSION': '${TORCH_VERSION}',
+    'SERVE_MODEL':   '${SERVE_MODEL}',
+    'SERVICE_USER':  '${SERVICE_USER}',
+}
+print(json.dumps(d))
+"
 }
 
-_wt_menu() {
-    # _wt_menu "Title" "Prompt" item1 desc1 item2 desc2 ...
-    local title="$1" prompt="$2"; shift 2
-    whiptail --title "${title}" --menu "${prompt}" 20 76 10 "$@" 3>&1 1>&2 2>&3
-}
+# ── Apply JSON result back to shell variables ─────────────────────────────────
+_apply_config_json() {
+    local json_file="$1"
+    [[ -f "${json_file}" ]] || return 1
 
-_wt_yesno() {
-    # Returns 0 for Yes, 1 for No
-    local title="$1" msg="$2"
-    whiptail --title "${title}" --yesno "${msg}" 10 70
-}
-
-_wt_msg() {
-    local title="$1" msg="$2"
-    whiptail --title "${title}" --msgbox "${msg}" 14 76
-}
-
-_wt_checklist() {
-    # _wt_checklist "Title" "Prompt" item1 desc1 ON/OFF ...
-    local title="$1" prompt="$2"; shift 2
-    whiptail --title "${title}" --checklist "${prompt}" 20 76 10 "$@" 3>&1 1>&2 2>&3
-}
-
-# ── Wizard pages ──────────────────────────────────────────────────────────────
-_page_welcome() {
-    local logo; logo=$(usage_logo)
-    _wt_msg "thorllm setup" \
-\
-"${logo}
-
-Welcome to thorllm — vLLM manager for NVIDIA Jetson Thor.
-
-This wizard will configure your installation.
-
-You will be asked about:
-  • Installation and cache directories
-  • vLLM version to install
-  • Default model to serve
-  • HuggingFace token (optional)
-  • systemd service user
-
-Settings are saved to ${BUILD_PATH}/thorllm.conf
-and can be changed by re-running: thorllm setup"
-}
-
-_page_build_path() {
-    local val
-    val=$(_wt_input "Installation" \
-        "Installation directory (BUILD_PATH):\nAll vllm files, venv, and model configs will be stored here." \
-        "${BUILD_PATH}") || return 1
-    [[ -n "${val}" ]] && BUILD_PATH="${val}"
-    # Recompute derived paths (used by config_export when install runs)
+    BUILD_PATH=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('BUILD_PATH','${BUILD_PATH}'))")
+    CACHE_ROOT=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('CACHE_ROOT','${CACHE_ROOT}'))")
+    VLLM_VERSION=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('VLLM_VERSION',''))")
+    TORCH_VERSION=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('TORCH_VERSION','${TORCH_VERSION}'))")
+    SERVE_MODEL=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('SERVE_MODEL','${SERVE_MODEL}'))")
+    SERVICE_USER=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('SERVICE_USER','${SERVICE_USER}'))")
+    HF_TOKEN=$(python3 -c "import json,sys; d=json.load(open('${json_file}')); print(d.get('HF_TOKEN',''))")
     export VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
     export MODELS_DIR="${BUILD_PATH}/models"
 }
 
-_page_cache_root() {
+# ── Fallback: plain readline prompts ─────────────────────────────────────────
+_fallback_wizard() {
+    warn "Textual not available — using plain prompts. Install with: pip install textual"
+    echo ""
+    usage_logo
+
     local val
-    val=$(_wt_input "Cache" \
-        "Cache root directory (CACHE_ROOT):\nAll Triton / FlashInfer / HuggingFace caches will be stored here.\nPut this on your fastest storage (NVMe if available)." \
-        "${CACHE_ROOT}") || return 1
+    read -r -p "$(echo -e "BUILD_PATH [${BUILD_PATH}]: ")" val
+    [[ -n "${val}" ]] && BUILD_PATH="${val}"
+
+    read -r -p "$(echo -e "CACHE_ROOT [${CACHE_ROOT}]: ")" val
     [[ -n "${val}" ]] && CACHE_ROOT="${val}"
-}
 
-_page_vllm_version() {
-    info "Fetching available vLLM releases…"
-    local latest
-    latest=$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest \
-        | jq -r .tag_name | sed 's/^v//' 2>/dev/null || echo "")
+    read -r -p "$(echo -e "VLLM_VERSION (leave blank for latest) [${VLLM_VERSION}]: ")" val
+    VLLM_VERSION="${val:-${VLLM_VERSION}}"
 
-    local recent
-    recent=$(curl -s "https://api.github.com/repos/vllm-project/vllm/releases?per_page=6" \
-        | jq -r '.[].tag_name' | sed 's/^v//' 2>/dev/null | head -5 || echo "")
-
-    local menu_items=()
-    menu_items+=("latest" "Always install the latest stable release")
-    while IFS= read -r v; do
-        [[ -n "${v}" ]] && menu_items+=("${v}" "vLLM v${v}")
-    done <<< "${recent}"
-
-    local choice
-    choice=$(_wt_menu "vLLM version" \
-        "Select vLLM version to install:\n(Latest detected: ${latest:-unknown})" \
-        "${menu_items[@]}") || return 1
-
-    if [[ "${choice}" == "latest" ]]; then
-        VLLM_VERSION=""
-    else
-        VLLM_VERSION="${choice}"
-    fi
-}
-
-_page_model() {
-    local val
-    val=$(_wt_input "Default model" \
-        "Default model to serve (SERVE_MODEL):\nFormat: <org>/<model-name>  e.g. openai/gpt-oss-120b\nA YAML config will be created at:\n  \${BUILD_PATH}/models/<org>/<name>.yaml" \
-        "${SERVE_MODEL}") || return 1
-    [[ -n "${val}" ]] && SERVE_MODEL="${val}"
-}
-
-_page_hf_token() {
-    local val
-    val=$(_wt_password "HuggingFace" \
-        "HuggingFace access token (optional):\nRequired only for gated models (Llama, Gemma, etc).\nLeave empty to skip.") || return 1
-    HF_TOKEN="${val}"
-}
-
-_page_service_user() {
-    local val
-    val=$(_wt_input "Service user" \
-        "User account to run the vLLM systemd service:" \
-        "${SERVICE_USER}") || return 1
-    [[ -n "${val}" ]] && SERVICE_USER="${val}"
-}
-
-_page_torch_version() {
-    local val
-    val=$(_wt_input "PyTorch version" \
-        "PyTorch version to install (must have cu130 build on download.pytorch.org):" \
-        "${TORCH_VERSION}") || return 1
+    read -r -p "$(echo -e "TORCH_VERSION [${TORCH_VERSION}]: ")" val
     [[ -n "${val}" ]] && TORCH_VERSION="${val}"
+
+    read -r -p "$(echo -e "SERVE_MODEL [${SERVE_MODEL}]: ")" val
+    [[ -n "${val}" ]] && SERVE_MODEL="${val}"
+
+    read -r -s -p "$(echo -e "HF_TOKEN (hidden, optional): ")" val
+    echo ""
+    HF_TOKEN="${val}"
+
+    read -r -p "$(echo -e "SERVICE_USER [${SERVICE_USER}]: ")" val
+    [[ -n "${val}" ]] && SERVICE_USER="${val}"
+
+    export VENV_PATH="${BUILD_PATH}/${VENV_NAME}"
+    export MODELS_DIR="${BUILD_PATH}/models"
 }
 
-_page_summary() {
-    local summary
-    summary="Configuration summary:
-
-  BUILD_PATH       ${BUILD_PATH}
-  CACHE_ROOT       ${CACHE_ROOT}
-  VLLM_VERSION     ${VLLM_VERSION:-latest}
-  TORCH_VERSION    ${TORCH_VERSION}
-  SERVE_MODEL      ${SERVE_MODEL}
-  SERVICE_USER     ${SERVICE_USER}
-  HF_TOKEN         ${HF_TOKEN:+(set)}${HF_TOKEN:-not set}
-
-Press OK to save and start installation,
-or Cancel to go back."
-
-    _wt_yesno "Ready to install" "${summary}" || return 1
-}
-
-# ── Main wizard ───────────────────────────────────────────────────────────────
+# ── Main wizard entry point ───────────────────────────────────────────────────
 run_wizard() {
-    command -v whiptail &>/dev/null \
-        || { warn "whiptail not found — running non-interactive install."
-             run_install 0; return; }
-
-    # Load existing config if present
     config_load
 
-    _page_welcome       || { info "Setup cancelled."; return 0; }
-    _page_build_path    || { info "Setup cancelled."; return 0; }
-    _page_cache_root    || { info "Setup cancelled."; return 0; }
-    _page_vllm_version  || { info "Setup cancelled."; return 0; }
-    _page_model         || { info "Setup cancelled."; return 0; }
-    _page_hf_token      || true   # optional — never abort on this page
-    _page_service_user  || { info "Setup cancelled."; return 0; }
-    _page_torch_version || { info "Setup cancelled."; return 0; }
-    _page_summary       || { info "Setup cancelled."; return 0; }
+    if ! _has_textual; then
+        _fallback_wizard
+    else
+        local defaults_json tmp_out
+        defaults_json=$(_build_defaults_json)
+        tmp_out=$(mktemp /tmp/thorllm-config-XXXXXX.json)
 
-    # Save config then run installer
+        # Pass --output so the TUI writes JSON to a file; stdout/stderr stay
+        # connected to the terminal so Textual can render its UI normally.
+        if python3 "${_TUI_PY}" \
+                --mode wizard \
+                --defaults "${defaults_json}" \
+                --version "${VERSION}" \
+                --output "${tmp_out}"; then
+            _apply_config_json "${tmp_out}"
+            rm -f "${tmp_out}"
+        else
+            rm -f "${tmp_out}"
+            info "Setup cancelled."
+            return 0
+        fi
+    fi
+
     config_save
     export HF_TOKEN
 
     clear
+    usage_logo
+    step "Starting installation"
+    echo ""
+
     source "${LIB_DIR}/install.sh"
     run_install 0
+}
+
+# ── Interactive model selection (called by `thorllm model select`) ─────────────
+_model_select_interactive() {
+    local active
+    active=$(grep '^SERVE_MODEL=' "${BUILD_PATH}/vllm.env" 2>/dev/null \
+        | cut -d= -f2 || echo "${SERVE_MODEL}")
+
+    local models=()
+    if [[ -d "${MODELS_DIR}" ]] && [[ -n "$(ls -A "${MODELS_DIR}" 2>/dev/null)" ]]; then
+        while read -r f; do
+            local rel
+            rel=$(realpath --relative-to="${MODELS_DIR}" "${f}" | sed 's/\.yaml$//')
+            models+=("${rel}")
+        done < <(find "${MODELS_DIR}" -name "*.yaml" ! -path "*/example/*" | sort)
+    fi
+
+    if [[ ${#models[@]} -eq 0 ]]; then
+        warn "No model configs found. Run: thorllm model add <org/name>"
+        return 1
+    fi
+
+    if ! _has_textual; then
+        # Fallback: numbered list
+        echo ""
+        step "Available models"
+        local i=1
+        for m in "${models[@]}"; do
+            local marker="  ○"
+            [[ "${m}" == "${active}" ]] && marker="  ●"
+            echo -e "${marker} ${i}) ${m}"
+            (( i++ ))
+        done
+        echo ""
+        read -r -p "$(echo -e "Select number [1-${#models[@]}]: ")" choice
+        if [[ "${choice}" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#models[@]} )); then
+            local selected="${models[$((choice-1))]}"
+            source "${LIB_DIR}/model.sh"
+            model_switch "${selected}"
+        else
+            warn "Invalid selection."
+        fi
+        return
+    fi
+
+    local models_json
+    models_json=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1:]))" "${models[@]}")
+    local tmp_out
+    tmp_out=$(mktemp /tmp/thorllm-model-XXXXXX.json)
+
+    # --output keeps stdout/stderr free for Textual to render the TUI.
+    if python3 "${_TUI_PY}" \
+            --mode model-select \
+            --models "${models_json}" \
+            --active "${active}" \
+            --version "${VERSION}" \
+            --output "${tmp_out}"; then
+        local selected
+        selected=$(python3 -c "import json; d=json.load(open('${tmp_out}')); print(d.get('selected',''))")
+        rm -f "${tmp_out}"
+        if [[ -n "${selected}" ]]; then
+            source "${LIB_DIR}/model.sh"
+            model_switch "${selected}"
+        fi
+    else
+        rm -f "${tmp_out}"
+        info "Model selection cancelled."
+    fi
 }
