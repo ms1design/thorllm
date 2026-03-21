@@ -149,44 +149,83 @@ patch_file(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Patch 2: qwen3_5_mtp.py — belt-and-suspenders around weight_loader call.
+# Patch 2: qwen3_5_mtp.py — belt-and-suspenders try/except around weight_loader
 #
-# Even after the parameter.py fix, a completely unrecoverable shape mismatch
-# Idempotency note: the bare call line "                    weight_loader(param, loaded_weight)\n"
-# (20 spaces) is a suffix-substring of the replacement body line
-# "                        weight_loader(param, loaded_weight)\n" (24 spaces).
-# Using the bare call as anchor causes the patch to re-apply on every run,
-# producing nested try-blocks and an IndentationError.
-# Fix: anchor on the weight_loader = getattr(...) block that precedes the call;
-# that block appears verbatim at the top of the replacement, so "old in new" is
-# True for the prefix — but the full old string (ending with the bare call at
-# 20 spaces) is NOT a substring of new (new ends that block with the try-except
-# at 24 spaces), making the patch idempotent.
+# Idempotency: the anchor includes the weight_loader = getattr(...) block that
+# precedes the call.  The full 4-line anchor string does NOT appear inside its
+# own replacement (the replacement ends that block with a try-except, not with
+# the bare call), so str.replace is a no-op on an already-patched file.
+#
+# Recovery: if a previous run applied the broken narrow-anchor patch (20-space
+# bare call as anchor), the file contains a double-nested try block with a
+# garbled-indent comment that causes IndentationError.  A recovery replacement
+# is attempted first; if the broken state is detected it is collapsed back to
+# the clean patched state before the normal anchor is checked.
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[2/2] qwen3_5_mtp.py — weight_loader call guard")
+print("\n[2/2] qwen3_5_mtp.py — weight_loader call guard (with corruption recovery)")
+
+_CLEAN_ANCHOR = (
+    "                    weight_loader = getattr(\n"
+    "                        param, \"weight_loader\", default_weight_loader\n"
+    "                    )\n"
+    "                    weight_loader(param, loaded_weight)\n"
+)
+_CORRECT_PATCH = (
+    "                    weight_loader = getattr(\n"
+    "                        param, \"weight_loader\", default_weight_loader\n"
+    "                    )\n"
+    "                    # thorllm: NVFP4-MTP — guard against packed-\n"
+    "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
+    "                    try:\n"
+    "                        weight_loader(param, loaded_weight)\n"
+    "                    except AssertionError:\n"
+    "                        if loaded_weight.numel() == param.data.numel():\n"
+    "                            param.data.copy_(\n"
+    "                                loaded_weight.reshape(param.data.shape)\n"
+    "                            )\n"
+    "                        else:\n"
+    "                            raise\n"
+)
+# The broken state produced by applying the old narrow anchor twice:
+# outer try: has an 8-line body that starts with a dedented comment, making
+# Python see the outer try: as having no real statement — IndentationError.
+_BROKEN_ANCHOR = (
+    "                    # thorllm: NVFP4-MTP — guard against packed-\n"
+    "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
+    "                    try:\n"
+    "                        # thorllm: NVFP4-MTP — guard against packed-\n"
+    "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
+    "                    try:\n"
+    "                        weight_loader(param, loaded_weight)\n"
+    "                    except AssertionError:\n"
+    "                        if loaded_weight.numel() == param.data.numel():\n"
+    "                            param.data.copy_(\n"
+    "                                loaded_weight.reshape(param.data.shape)\n"
+    "                            )\n"
+    "                        else:\n"
+    "                            raise\n"
+    "                    except AssertionError:\n"
+    "                        if loaded_weight.numel() == param.data.numel():\n"
+    "                            param.data.copy_(\n"
+    "                                loaded_weight.reshape(param.data.shape)\n"
+    "                            )\n"
+    "                        else:\n"
+    "                            raise\n"
+)
+# Recovery replaces the broken state with the correct already-patched state.
+# The normal anchor then sees the correct patched state and prints ALREADY PATCHED.
 patch_file(
     "model_executor/models/qwen3_5_mtp.py",
     [
+        # Step 1: recover from broken double-try state (no-op if not broken)
         (
-            "                    weight_loader = getattr(\n"
-            "                        param, \"weight_loader\", default_weight_loader\n"
-            "                    )\n"
-            "                    weight_loader(param, loaded_weight)\n",
-            # ── replacement ──────────────────────────────────────────────────
-            "                    weight_loader = getattr(\n"
-            "                        param, \"weight_loader\", default_weight_loader\n"
-            "                    )\n"
-            "                    # thorllm: NVFP4-MTP — guard against packed-\n"
-            "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
-            "                    try:\n"
-            "                        weight_loader(param, loaded_weight)\n"
-            "                    except AssertionError:\n"
-            "                        if loaded_weight.numel() == param.data.numel():\n"
-            "                            param.data.copy_(\n"
-            "                                loaded_weight.reshape(param.data.shape)\n"
-            "                            )\n"
-            "                        else:\n"
-            "                            raise\n",
+            _BROKEN_ANCHOR,
+            _CORRECT_PATCH,
+        ),
+        # Step 2: apply correct patch to clean state (no-op if already patched)
+        (
+            _CLEAN_ANCHOR,
+            _CORRECT_PATCH,
         ),
     ],
 )

@@ -313,18 +313,29 @@ print("\n[7/8] kernels/linear/scaled_mm/cutlass.py — fix non-contiguous weight
 patch_file(
     "model_executor/kernels/linear/scaled_mm/cutlass.py",
     [
-        # The ONLY fix needed: make the transposed weight contiguous.
-        # This resolves CUBLAS_STATUS_INVALID_VALUE on SM110 (and any other
-        # arch where cuBLAS rejects column-major BF16 operands) without
-        # disabling CUTLASS for SM110.
+        # Anchor 1: original unpatched line
         (
             "            torch.nn.Parameter(weight.t().data, requires_grad=False),",
+            "            torch.nn.Parameter(weight.t().contiguous().data, requires_grad=False),  # thorllm: .contiguous() prevents column-major strides that cuBLAS rejects",
+        ),
+        # Anchor 2: previous session patched with old "thorllm SM110:" comment block
+        (
+            "            # thorllm SM110: use .contiguous() so the stored weight is\n"
+            "            # row-major; inductor then emits a normal stride layout\n"
+            "            # instead of a column-major reinterpret_tensor that triggers\n"
+            "            # CUBLAS_STATUS_INVALID_VALUE on JetPack cuBLAS (sm11.0a).\n"
+            "            torch.nn.Parameter(weight.t().contiguous().data, requires_grad=False),",
+            "            torch.nn.Parameter(weight.t().contiguous().data, requires_grad=False),  # thorllm: .contiguous() prevents column-major strides that cuBLAS rejects",
+        ),
+        # Anchor 3: previous session patched with "thorllm: weight.t() is a non-contiguous" comment block
+        (
             "            # thorllm: weight.t() is a non-contiguous view with strides\n"
             "            # (1, K) — column-major. JetPack cuBLAS on SM110 rejects BF16\n"
             "            # operands with that stride layout (CUBLAS_STATUS_INVALID_VALUE).\n"
             "            # .contiguous() materialises the transpose as a row-major (K, N)\n"
             "            # tensor with strides (N, 1) so inductor emits a standard mm.\n"
             "            torch.nn.Parameter(weight.t().contiguous().data, requires_grad=False),",
+            "            torch.nn.Parameter(weight.t().contiguous().data, requires_grad=False),  # thorllm: .contiguous() prevents column-major strides that cuBLAS rejects",
         ),
     ],
 )
