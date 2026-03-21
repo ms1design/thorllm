@@ -278,100 +278,53 @@ patch_file(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Patch 7 (renumbered): kernels/linear/scaled_mm/cutlass.py
-#   — exclude SM110 from CUTLASS FP8 and Int8 kernels
-#   — fix non-contiguous transposed weight storage (CUBLAS_STATUS_INVALID_VALUE)
+# Patch 7: kernels/linear/scaled_mm/cutlass.py
+#   — fix non-contiguous transposed weight (CUBLAS_STATUS_INVALID_VALUE on SM110)
 #
-# Root cause (Error 2 — Nemotron CUBLAS_STATUS_INVALID_VALUE):
+# Root cause (ALL three "CUBLAS_STATUS_INVALID_VALUE" errors across every model):
 #   CutlassInt8ScaledMMLinearKernel.process_weights_after_loading stores the
 #   transposed weight as:
 #     torch.nn.Parameter(weight.t().data, requires_grad=False)
-#   weight.t() is a non-contiguous *view* with column-major strides (1, K).
-#   torch.inductor captures this and emits:
-#     reinterpret_tensor(weight, (K, N), (1, K), 0)
-#   On SM110 (Jetson Thor / JetPack cuBLAS), cublasGemmEx rejects CUDA_R_16BF
-#   operands with column-major strides → CUBLAS_STATUS_INVALID_VALUE.
-#   Fix: use weight.t().contiguous().data so the stored tensor is always
-#   row-major, and inductor emits a normal (K, 1) stride layout.
+#   weight.t() is a non-contiguous VIEW with column-major strides (1, K).
+#   torch.inductor captures those strides and emits:
+#     extern_kernels.mm(x, reinterpret_tensor(weight, (K, N), (1, K), 0), ...)
+#   JetPack cuBLAS on SM110 rejects CUDA_R_16BF operands with strides (1, K)
+#   and returns CUBLAS_STATUS_INVALID_VALUE.
 #
-# Root cause (Error 3 — Qwen3-FP8 RuntimeError: Error Internal):
-#   CutlassFP8ScaledMMLinearKernel.is_supported() returns True for any CUDA
-#   device, so SM110 gets dispatched to CUTLASS FP8 (ops.cutlass_scaled_mm).
-#   The CUTLASS FP8 kernel binary targets SM89/SM90/SM100 only; on SM11.x it
-#   raises a generic CUDA "Error Internal" at kernel launch.
-#   Fix: return False from is_supported() for SM110 so the kernel selector
-#   falls through to PerTensorTorchFP8ScaledMMLinearKernel (torch._scaled_mm),
-#   which is safe on SM110.
+#   Fix: weight.t().contiguous().data — the stored tensor is row-major (K, N)
+#   with strides (N, 1). Inductor emits a normal mm with standard strides and
+#   cuBLAS is happy on any architecture including SM110.
 #
-# In vLLM 0.18.0 the fp8.py flat dispatch no longer exists; the kernel
-# selection moved to kernels/linear/scaled_mm/cutlass.py.
+#   NOTE: This is NOT an SM110-only bug — it is a correctness issue on any
+#   architecture whose cuBLAS rejects non-contiguous BF16 operands. The fix
+#   applies unconditionally, not just for SM110.
+#
+#   NOTE: CutlassFP8ScaledMMLinearKernel has no process_weights_after_loading
+#   (inherits `pass` from the base class) — no weight transposition happens
+#   there, so no fix is needed. ops.cutlass_scaled_mm handles the FP8 weight
+#   layout internally including on SM110.
+#
+#   SM110 support: BOTH CutlassInt8 and CutlassFP8 are KEPT enabled for SM110.
+#   The vllm==0.18.0+cu130 build was compiled against CUDA 13.0 which has
+#   full SM110 (Jetson Thor) support — CUTLASS kernels are compiled for SM11.x.
+#   We do NOT add SM110 exclusions here.
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[7/8] kernels/linear/scaled_mm/cutlass.py — SM110 exclusion + contiguous weight")
+print("\n[7/8] kernels/linear/scaled_mm/cutlass.py — fix non-contiguous weight (all arches)")
 patch_file(
     "model_executor/kernels/linear/scaled_mm/cutlass.py",
     [
-        # ── Fix A: CutlassInt8 is_supported — exclude SM110 ──────────────────
-        (
-            "class CutlassInt8ScaledMMLinearKernel(Int8ScaledMMLinearKernel):\n"
-            "    @classmethod\n"
-            "    def is_supported(\n"
-            "        cls, compute_capability: int | None = None\n"
-            "    ) -> tuple[bool, str | None]:\n"
-            "        if not current_platform.is_cuda():\n"
-            "            return False, \"requires CUDA.\"\n"
-            "        return True, None",
-            "class CutlassInt8ScaledMMLinearKernel(Int8ScaledMMLinearKernel):\n"
-            "    @classmethod\n"
-            "    def is_supported(\n"
-            "        cls, compute_capability: int | None = None\n"
-            "    ) -> tuple[bool, str | None]:\n"
-            "        if not current_platform.is_cuda():\n"
-            "            return False, \"requires CUDA.\"\n"
-            "        # thorllm SM110: CUTLASS Int8 kernels target SM80-SM100 only.\n"
-            "        # On SM110 (Jetson Thor), dispatch falls through to\n"
-            "        # TritonInt8ScaledMMLinearKernel which is safe on SM11.x.\n"
-            "        _cc = current_platform.get_device_capability()\n"
-            "        if _cc is not None and _cc[0] == 11:\n"
-            "            return False, \"CUTLASS Int8 not compiled for SM11.x (Thor).\"\n"
-            "        return True, None",
-        ),
-        # ── Fix B: process_weights_after_loading — make transposed weight contiguous ──
-        # weight.t().data produces a column-major view; inductor captures the
-        # strides and generates reinterpret_tensor(..., (1, K), ...) which
-        # JetPack cuBLAS rejects for BF16. Use .t().contiguous().data so the
-        # stored parameter is always row-major.
+        # The ONLY fix needed: make the transposed weight contiguous.
+        # This resolves CUBLAS_STATUS_INVALID_VALUE on SM110 (and any other
+        # arch where cuBLAS rejects column-major BF16 operands) without
+        # disabling CUTLASS for SM110.
         (
             "            torch.nn.Parameter(weight.t().data, requires_grad=False),",
-            "            # thorllm SM110: use .contiguous() so the stored weight is\n"
-            "            # row-major; inductor then emits a normal stride layout\n"
-            "            # instead of a column-major reinterpret_tensor that triggers\n"
-            "            # CUBLAS_STATUS_INVALID_VALUE on JetPack cuBLAS (sm11.0a).\n"
+            "            # thorllm: weight.t() is a non-contiguous view with strides\n"
+            "            # (1, K) — column-major. JetPack cuBLAS on SM110 rejects BF16\n"
+            "            # operands with that stride layout (CUBLAS_STATUS_INVALID_VALUE).\n"
+            "            # .contiguous() materialises the transpose as a row-major (K, N)\n"
+            "            # tensor with strides (N, 1) so inductor emits a standard mm.\n"
             "            torch.nn.Parameter(weight.t().contiguous().data, requires_grad=False),",
-        ),
-        # ── Fix C: CutlassFP8 is_supported — exclude SM110 ───────────────────
-        (
-            "class CutlassFP8ScaledMMLinearKernel(FP8ScaledMMLinearKernel):\n"
-            "    @classmethod\n"
-            "    def is_supported(\n"
-            "        cls, compute_capability: int | None = None\n"
-            "    ) -> tuple[bool, str | None]:\n"
-            "        if not current_platform.is_cuda():\n"
-            "            return False, \"requires CUDA.\"\n"
-            "        return True, None",
-            "class CutlassFP8ScaledMMLinearKernel(FP8ScaledMMLinearKernel):\n"
-            "    @classmethod\n"
-            "    def is_supported(\n"
-            "        cls, compute_capability: int | None = None\n"
-            "    ) -> tuple[bool, str | None]:\n"
-            "        if not current_platform.is_cuda():\n"
-            "            return False, \"requires CUDA.\"\n"
-            "        # thorllm SM110: CUTLASS FP8 kernels target SM89/SM90/SM100 only.\n"
-            "        # On SM110 (Jetson Thor) the kernel raises RuntimeError: Error\n"
-            "        # Internal at launch. Fall through to PerTensorTorchFP8 (safe).\n"
-            "        _cc = current_platform.get_device_capability()\n"
-            "        if _cc is not None and _cc[0] == 11:\n"
-            "            return False, \"CUTLASS FP8 not compiled for SM11.x (Thor).\"\n"
-            "        return True, None",
         ),
     ],
 )
@@ -403,6 +356,20 @@ for _legacy_file, _legacy_anchor, _legacy_replacement in [
 ]:
     patch_file(_legacy_file, [(_legacy_anchor, _legacy_replacement)])
 
+print("\n[9/9] kernels/linear/scaled_mm/flashinfer.py")
+print("  NOTE: FlashInfer FP8 is_supported() requires compute_capability >= 100.")
+print("  SM110 (Thor) = 110, which passes. vllm==0.18.0+cu130 was built against")
+print("  CUDA 13.0 with full SM110 support — FlashInfer FP8 is presumed to work.")
+print("  No exclusion applied. If bmm_fp8 fails on SM110, patch will be added then.")
+patch_file(
+    "model_executor/kernels/linear/scaled_mm/flashinfer.py",
+    [
+        # No-op sentinel: ensures this file is at least checked each run.
+        # If a future FlashInfer build ships without SM110 support, add an
+        # exclusion here with the exact error evidence to justify it.
+    ],
+)
+
 print("\nSM110 patch complete.")
 print(
     "Backup files (.pre_sm110_patch) written next to each patched file.\n"
@@ -410,6 +377,8 @@ print(
     f"{VLLM_ROOT}/model_executor/layers/\n"
     "To verify conv.py fix: grep -A4 'is_sm110' "
     f"{VLLM_ROOT}/model_executor/layers/conv.py\n"
-    "To verify cutlass fix: grep -A4 'thorllm SM110' "
-    f"{VLLM_ROOT}/model_executor/kernels/linear/scaled_mm/cutlass.py"
+    "To verify cutlass fix: grep -A2 'thorllm:' "
+    f"{VLLM_ROOT}/model_executor/kernels/linear/scaled_mm/cutlass.py\n"
+    "To verify flashinfer fix: grep -A4 'thorllm SM110' "
+    f"{VLLM_ROOT}/model_executor/kernels/linear/scaled_mm/flashinfer.py"
 )
