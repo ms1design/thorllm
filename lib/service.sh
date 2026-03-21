@@ -9,6 +9,101 @@ _health_check() {
     curl -sf "http://localhost:${port}/v1/health" &>/dev/null
 }
 
+# ── Stale env file detector ───────────────────────────────────────────────────
+# Checks the deployed vllm.env for the two CUBLAS fixes introduced after the
+# initial release.  Called automatically before start/restart so users get an
+# actionable warning rather than a cryptic RuntimeError in the logs.
+#
+# Symptoms of a stale env:
+#   RuntimeError: CUDA error: CUBLAS_STATUS_NOT_INITIALIZED
+#       ... qwen3_vl.py → conv.py → F.linear → cublasLtMatmulAlgoGetHeuristic
+#
+# Root cause: JetPack ships cuBLAS in /usr/lib/aarch64-linux-gnu, not in
+#   ${CUDA_HOME}/lib64.  The old template set only CUDA_HOME/lib64, so
+#   cublasLt could not initialise its handle during NVFP4 patch-embed warmup.
+#   Fix: prepend /usr/lib/aarch64-linux-gnu to LD_LIBRARY_PATH.
+#   Additionally, CUBLAS_WORKSPACE_CONFIG=:4096:8 serialises handle init
+#   across threads and prevents a race-condition variant of the same error.
+_check_env_staleness() {
+    local env_file="${BUILD_PATH}/vllm.env"
+    [[ -f "${env_file}" ]] || return 0   # not yet installed — nothing to check
+
+    local stale=0
+    local issues=()
+
+    # Check 1: /usr/lib/aarch64-linux-gnu must come BEFORE ${CUDA_HOME}/lib64
+    # in LD_LIBRARY_PATH so cublasLt is loaded from the JetPack system path.
+    if ! grep -q '^LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu' "${env_file}"; then
+        stale=1
+        issues+=("LD_LIBRARY_PATH is missing /usr/lib/aarch64-linux-gnu prefix (CUBLAS_STATUS_NOT_INITIALIZED)")
+    fi
+
+    # Check 2: CUBLAS_WORKSPACE_CONFIG must be set to serialise handle init.
+    if ! grep -q '^CUBLAS_WORKSPACE_CONFIG=' "${env_file}"; then
+        stale=1
+        issues+=("CUBLAS_WORKSPACE_CONFIG is not set (thread-race variant of NOT_INITIALIZED)")
+    fi
+
+    if [[ "${stale}" == "1" ]]; then
+        echo ""
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warn "  STALE vllm.env DETECTED — vLLM will likely crash on startup"
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warn ""
+        warn "  Your ${env_file} was generated"
+        warn "  from an older thorllm template that is missing critical cuBLAS"
+        warn "  path fixes for NVFP4 models on Jetson Thor (SM110)."
+        warn ""
+        for issue in "${issues[@]}"; do
+            warn "  • ${issue}"
+        done
+        warn ""
+        warn "  Without these fixes the EngineCore crashes during vision"
+        warn "  encoder warmup (patch_embed → F.linear → cublasLtMatmulAlgo)."
+        warn ""
+        warn "  Fix in 10 seconds (no reinstall required):"
+        warn ""
+        warn "    thorllm reconfigure"
+        warn ""
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        return 1
+    fi
+    return 0
+}
+
+# ── Reconfigure (regenerate env + launcher without reinstalling vLLM) ─────────
+# Re-renders vllm.env and vllm-serve.sh from the current templates, then
+# reloads systemd and optionally restarts the service.  Use this after a
+# thorllm git pull to pick up env/template fixes without a full reinstall.
+run_reconfigure() {
+    step "Reconfiguring thorllm (env file + launcher)"
+
+    source "${LIB_DIR}/config.sh"
+    config_load
+
+    info "Regenerating EnvironmentFile and launcher from current templates…"
+
+    write_env_file
+    write_service_files
+
+    echo ""
+    success "vllm.env and vllm-serve.sh regenerated."
+
+    # Reload systemd so it picks up any unit-file changes
+    if sudo systemctl daemon-reload 2>/dev/null; then
+        success "systemd daemon reloaded."
+    else
+        warn "systemctl daemon-reload failed — run: sudo systemctl daemon-reload"
+    fi
+
+    echo ""
+    echo "  Changes take effect on next start.  To apply immediately:"
+    echo ""
+    echo "    thorllm restart"
+    echo ""
+}
+
 # ── EnvironmentFile ───────────────────────────────────────────────────────────
 write_env_file() {
     local env_file="${BUILD_PATH}/vllm.env"
@@ -156,6 +251,11 @@ service_ctl() {
     case "${cmd}" in
         start)
             step "Starting ${SERVICE_NAME}"
+            _check_env_staleness || {
+                warn "Proceeding anyway — expect CUBLAS_STATUS_NOT_INITIALIZED."
+                warn "Run 'thorllm reconfigure' first to fix the env file."
+                echo ""
+            }
             echo ""
             echo -e "[sudo] Starting systemd service requires elevated privileges."
             sudo systemctl start "${SERVICE_NAME}"
@@ -171,6 +271,11 @@ service_ctl() {
             ;;
         restart)
             step "Restarting ${SERVICE_NAME}"
+            _check_env_staleness || {
+                warn "Proceeding anyway — expect CUBLAS_STATUS_NOT_INITIALIZED."
+                warn "Run 'thorllm reconfigure' first to fix the env file."
+                echo ""
+            }
             sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
             sudo systemctl restart "${SERVICE_NAME}"
             echo ""

@@ -38,6 +38,8 @@ Install:
   setup                  Interactive TUI setup wizard
   install                Run full install (non-interactive, uses config)
   install --update       Update vLLM to latest version
+  reconfigure            Regenerate vllm.env + launcher from current templates
+                         (use after 'git pull' to apply env fixes without reinstalling)
 
 Service:
   start [-p PORT]        Start the vLLM service
@@ -115,8 +117,9 @@ while [[ $# -gt 0 ]]; do
         -p|--port)
             export VLLM_PORT="$2"; shift 2
             ;;
-        setup)    CMD=setup;       shift ;;
-        install)  CMD=install;     shift ;;
+        setup)    CMD=setup;         shift ;;
+        install)  CMD=install;       shift ;;
+        reconfigure) CMD=reconfigure; shift ;;
         start)    CMD=start;       shift ;;
         stop)     CMD=stop;        shift ;;
         restart)  CMD=restart;     shift ;;
@@ -168,6 +171,10 @@ case "${CMD:-}" in
     install)
         source "${LIB_DIR}/install.sh"
         run_install "${UPDATE}"
+        ;;
+    reconfigure)
+        source "${LIB_DIR}/service.sh"
+        run_reconfigure
         ;;
     start|stop|restart|status)
         source "${LIB_DIR}/service.sh"

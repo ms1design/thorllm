@@ -16,7 +16,7 @@ _thorllm_complete_bash() {
         cword="${COMP_CWORD}"
     }
 
-    local commands="setup install start stop restart status logs kill model version config uninstall"
+    local commands="setup install reconfigure start stop restart status logs kill model version config uninstall"
     local model_cmds="list add switch select show edit"
     local global_opts="--help --no-color --build-path -h"
 
@@ -88,6 +88,7 @@ _thorllm_complete_zsh() {
     commands=(
         'setup:Interactive TUI setup wizard'
         'install:Run full installation'
+        'reconfigure:Regenerate vllm.env + launcher from current templates'
         'start:Start the vLLM service'
         'stop:Stop the vLLM service'
         'restart:Restart the vLLM service'
