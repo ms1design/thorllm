@@ -149,86 +149,87 @@ patch_file(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Patch 2: qwen3_5_mtp.py — belt-and-suspenders try/except around weight_loader
+# Patch 2: qwen3_5_mtp.py — robust region-replacement (handles all broken states)
 #
-# Idempotency: the anchor includes the weight_loader = getattr(...) block that
-# precedes the call.  The full 4-line anchor string does NOT appear inside its
-# own replacement (the replacement ends that block with a try-except, not with
-# the bare call), so str.replace is a no-op on an already-patched file.
+# Previous str.replace-based approaches produced multiple broken states because
+# the replacement text was a substring of itself (idempotency failures) and
+# because replacing a sub-region that didn't include the getattr block resulted
+# in the getattr block being duplicated into the try-body at wrong indentation.
 #
-# Recovery: if a previous run applied the broken narrow-anchor patch (20-space
-# bare call as anchor), the file contains a double-nested try block with a
-# garbled-indent comment that causes IndentationError.  A recovery replacement
-# is attempted first; if the broken state is detected it is collapsed back to
-# the clean patched state before the normal anchor is checked.
+# Root cause of SyntaxError "expected 'except' or 'finally' block" at line 327:
+#   The _BROKEN_ANCHOR (old) didn't include the getattr block, but _CORRECT_PATCH
+#   (new) did. After replacing _BROKEN_ANCHOR with _CORRECT_PATCH, the getattr
+#   block appeared TWICE — once at the correct level and once INSIDE the outer
+#   try: body at 24-space indent (due to "    " + 20sp getattr → 24sp getattr).
+#   Python parses the outer try: body as containing the getattr call statement,
+#   then sees a dedented try: without an except → SyntaxError.
+#
+# Fix: abandon str.replace entirely for this file. Instead, find the stable
+# region between two unique anchors and replace it wholesale. The start anchor
+# ("                    param = params_dict[name]\n") and end anchor
+# ("            loaded_params.add(name)\n") are each unique in the file and
+# bracket the entire weight-loader region regardless of how broken it is.
+# This approach is safe for ANY broken state.
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[2/2] qwen3_5_mtp.py — weight_loader call guard (with corruption recovery)")
+print("\n[2/2] qwen3_5_mtp.py — weight_loader region repair (handles all broken states)")
 
-_CLEAN_ANCHOR = (
-    "                    weight_loader = getattr(\n"
-    "                        param, \"weight_loader\", default_weight_loader\n"
-    "                    )\n"
-    "                    weight_loader(param, loaded_weight)\n"
-)
-_CORRECT_PATCH = (
-    "                    weight_loader = getattr(\n"
-    "                        param, \"weight_loader\", default_weight_loader\n"
-    "                    )\n"
-    "                    # thorllm: NVFP4-MTP — guard against packed-\n"
-    "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
-    "                    try:\n"
-    "                        weight_loader(param, loaded_weight)\n"
-    "                    except AssertionError:\n"
-    "                        if loaded_weight.numel() == param.data.numel():\n"
-    "                            param.data.copy_(\n"
-    "                                loaded_weight.reshape(param.data.shape)\n"
-    "                            )\n"
-    "                        else:\n"
-    "                            raise\n"
-)
-# The broken state produced by applying the old narrow anchor twice:
-# outer try: has an 8-line body that starts with a dedented comment, making
-# Python see the outer try: as having no real statement — IndentationError.
-_BROKEN_ANCHOR = (
-    "                    # thorllm: NVFP4-MTP — guard against packed-\n"
-    "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
-    "                    try:\n"
-    "                        # thorllm: NVFP4-MTP — guard against packed-\n"
-    "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
-    "                    try:\n"
-    "                        weight_loader(param, loaded_weight)\n"
-    "                    except AssertionError:\n"
-    "                        if loaded_weight.numel() == param.data.numel():\n"
-    "                            param.data.copy_(\n"
-    "                                loaded_weight.reshape(param.data.shape)\n"
-    "                            )\n"
-    "                        else:\n"
-    "                            raise\n"
-    "                    except AssertionError:\n"
-    "                        if loaded_weight.numel() == param.data.numel():\n"
-    "                            param.data.copy_(\n"
-    "                                loaded_weight.reshape(param.data.shape)\n"
-    "                            )\n"
-    "                        else:\n"
-    "                            raise\n"
-)
-# Recovery replaces the broken state with the correct already-patched state.
-# The normal anchor then sees the correct patched state and prints ALREADY PATCHED.
-patch_file(
-    "model_executor/models/qwen3_5_mtp.py",
-    [
-        # Step 1: recover from broken double-try state (no-op if not broken)
-        (
-            _BROKEN_ANCHOR,
-            _CORRECT_PATCH,
-        ),
-        # Step 2: apply correct patch to clean state (no-op if already patched)
-        (
-            _CLEAN_ANCHOR,
-            _CORRECT_PATCH,
-        ),
-    ],
-)
+_MTP_PATH = "model_executor/models/qwen3_5_mtp.py"
+_MTP_FILE = VLLM_ROOT / _MTP_PATH
+
+if not _MTP_FILE.exists():
+    print(f"  SKIP (not found): {_MTP_PATH}")
+else:
+    _content = _MTP_FILE.read_text()
+
+    # The correct region content: from param = params_dict[name] up to (not
+    # including) loaded_params.add(name).  Both anchors are unique in the file.
+    _REGION_START = "                    param = params_dict[name]\n"
+    _REGION_END   = "            loaded_params.add(name)\n"
+
+    _CORRECT_REGION = (
+        "                    param = params_dict[name]\n"
+        "                    weight_loader = getattr(\n"
+        "                        param, \"weight_loader\", default_weight_loader\n"
+        "                    )\n"
+        "                    # thorllm: NVFP4-MTP — guard against packed-\n"
+        "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
+        "                    try:\n"
+        "                        weight_loader(param, loaded_weight)\n"
+        "                    except AssertionError:\n"
+        "                        if loaded_weight.numel() == param.data.numel():\n"
+        "                            param.data.copy_(\n"
+        "                                loaded_weight.reshape(param.data.shape)\n"
+        "                            )\n"
+        "                        else:\n"
+        "                            raise\n"
+    )
+
+    if _REGION_START not in _content or _REGION_END not in _content:
+        print(f"  NOT FOUND: {_MTP_PATH} — stable anchors missing (file may have changed upstream)")
+    else:
+        _idx_start = _content.find(_REGION_START)
+        _idx_end   = _content.find(_REGION_END, _idx_start)
+        _current_region = _content[_idx_start:_idx_end]
+
+        if _current_region == _CORRECT_REGION:
+            print(f"  ALREADY PATCHED: {_MTP_PATH}")
+        else:
+            _new_content = _content[:_idx_start] + _CORRECT_REGION + _content[_idx_end:]
+            # Validate before writing
+            try:
+                import ast as _ast
+                _ast.parse(_new_content)
+            except SyntaxError as _e:
+                print(f"  ERROR: repaired content has syntax error: {_e} — not writing")
+            else:
+                _backup = _MTP_FILE.parent / (_MTP_FILE.name + ".pre_mtp_nvfp4_patch")
+                if not _backup.exists():
+                    _backup.write_text(_content)
+                _MTP_FILE.write_text(_new_content)
+                if "# thorllm: NVFP4-MTP" in _current_region:
+                    print(f"  REPAIRED (was broken): {_MTP_PATH}")
+                else:
+                    print(f"  PATCHED: {_MTP_PATH}")
 
 print("\nMTP NVFP4 patch complete.")
 print(

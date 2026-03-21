@@ -148,12 +148,28 @@ clear_compile_cache() {
     step "Clearing compile caches"
     echo ""
 
-    for cache_dir in \
-        "${cache_root}/inductor" \
-        "${cache_root}/torch_compile" \
-        "${cache_root}/triton" \
+    # Build list of candidate directories: both the configured path and the
+    # known default (~/.cache/vllm/inductor) in case CACHE_ROOT differs.
+    local -a candidates=(
+        "${cache_root}/inductor"
+        "${cache_root}/torch_compile"
+        "${cache_root}/triton"
         "${cache_root}/flashinfer"
-    do
+        "${HOME}/.cache/vllm/inductor"
+        "${HOME}/.cache/vllm/torch_compile"
+        "${HOME}/.cache/vllm/triton"
+        "${HOME}/.cache/vllm/flashinfer"
+    )
+
+    # Track which directories we've already deleted (deduplicate when cache_root
+    # happens to be ~/.cache/vllm, which is the common case).
+    declare -A seen=()
+    for cache_dir in "${candidates[@]}"; do
+        # Resolve to absolute path for dedup
+        local abs_dir; abs_dir=$(realpath -m "${cache_dir}" 2>/dev/null || echo "${cache_dir}")
+        [[ -n "${seen[${abs_dir}]+x}" ]] && continue
+        seen["${abs_dir}"]=1
+
         if [[ -d "${cache_dir}" ]]; then
             info "  Removing: ${cache_dir}"
             rm -rf "${cache_dir}"
