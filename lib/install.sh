@@ -106,11 +106,39 @@ set_cuda_env() {
 
 # ── PyTorch ───────────────────────────────────────────────────────────────────
 install_pytorch() {
-    step "PyTorch ${TORCH_VERSION}+cu130"
+    # When the user picks "latest" in the TUI wizard, version vars are empty
+    # strings.  Build version-pinned specs only when the var is non-empty so
+    # uv never sees "torch==" (invalid specifier).
+    local _torch_spec _tv_spec _ta_spec
+    if [[ -n "${TORCH_VERSION}" ]]; then
+        _torch_spec="torch==${TORCH_VERSION}"
+        # Only pin companion packages when torch itself is pinned — if torch is
+        # "latest", unpinning all three lets pip/uv resolve a consistent set.
+        if [[ -n "${TORCHVISION_VERSION}" ]]; then
+            _tv_spec="torchvision==${TORCHVISION_VERSION}"
+        else
+            _tv_spec="torchvision"
+        fi
+        if [[ -n "${TORCHAUDIO_VERSION}" ]]; then
+            _ta_spec="torchaudio==${TORCHAUDIO_VERSION}"
+        else
+            _ta_spec="torchaudio"
+        fi
+    else
+        # User selected "latest" — install all three without version pins so
+        # uv can resolve a consistent compatible set from the cu130 index.
+        # Avoids "torch==" and companion version mismatches.
+        _torch_spec="torch"
+        _tv_spec="torchvision"
+        _ta_spec="torchaudio"
+        info "TORCH_VERSION unset — installing latest stable torch+vision+audio from cu130 index"
+    fi
+
+    step "PyTorch ${TORCH_VERSION:-latest}+cu130"
     uv pip install --force-reinstall \
-        "torch==${TORCH_VERSION}" \
-        "torchvision==${TORCHVISION_VERSION}" \
-        "torchaudio==${TORCHAUDIO_VERSION}" \
+        "${_torch_spec}" \
+        "${_tv_spec}" \
+        "${_ta_spec}" \
         --index-url https://download.pytorch.org/whl/cu130
 
     python -c "
@@ -397,6 +425,35 @@ run_install() {
     local update="${1:-0}"
 
     step "vLLM installer for Jetson Thor"
+
+    # ── Sudo credential pre-flight ────────────────────────────────────────────
+    # Ask for the sudo password once, right at the start, so every subsequent
+    # sudo call (systemd service install, sudoers rule, sysctl) uses the cached
+    # credentials without prompting mid-install.
+    echo ""
+    echo "[sudo] This installer needs root access for:"
+    echo "       • Dropping page cache      (sysctl vm.drop_caches)"
+    echo "       • Installing system packages (apt-get)"
+    echo "       • Writing systemd unit      (/etc/systemd/system/vllm.service)"
+    echo "       • Creating sudoers rule     (/etc/sudoers.d/vllm-drop-caches)"
+    echo ""
+    if sudo -v 2>/dev/null; then
+        success "sudo credentials cached for this session."
+        # Keep sudo ticket alive in background for long installs (vLLM build can
+        # take 60-90 minutes on Thor).
+        ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) &
+        _SUDO_KEEPALIVE_PID=$!
+        # Kill the keepalive when the install function exits (success or error).
+        trap 'kill "${_SUDO_KEEPALIVE_PID}" 2>/dev/null || true' RETURN
+    else
+        warn "sudo not available — service/sudoers steps will be skipped."
+        warn "You can install the systemd service manually afterwards:"
+        warn "  sudo cp /tmp/vllm.service.rendered /etc/systemd/system/vllm.service"
+        warn "  sudo systemctl daemon-reload && sudo systemctl enable vllm"
+    fi
+    echo ""
+
+    # Drop page cache now that we have credentials (frees GPU VRAM for install)
     sudo sysctl -w vm.drop_caches=3 >/dev/null 2>&1 || true
 
     # Ensure key directories exist immediately — so even a partial run
