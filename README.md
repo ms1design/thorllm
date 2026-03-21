@@ -148,7 +148,6 @@ Hardcoded launcher args (set in `templates/vllm-serve.sh`, applied to every mode
 |---|---|
 | `--max-num-seqs` | `4` |
 | `--cpu-offload-gb` | `0` |
-| `--swap-space` | `0` |
 | `--host` | `0.0.0.0` |
 | `--disable-fastapi-docs` | on |
 | `--enable-force-include-usage` | on |

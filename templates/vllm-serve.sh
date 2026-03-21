@@ -33,7 +33,6 @@ exec "${VLLM_BIN}" serve \
     --config "${MODEL_CONFIG}" \
     --max-num-seqs 4 \
     --cpu-offload-gb 0 \
-    --swap-space 0 \
     --host 0.0.0.0 \
     --disable-fastapi-docs \
     --enable-force-include-usage \
