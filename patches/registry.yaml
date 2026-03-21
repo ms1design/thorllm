@@ -11,12 +11,34 @@
 # =============================================================================
 
 patches:
+patches:
   patch_sm110:
-    description: "SM110 (Jetson Thor) CUTLASS NVFP4 capability-family fix"
+    description: "SM110 (Jetson Thor) CUTLASS NVFP4 capability-family fix + Conv3dLayer cuBLAS crash fix"
     notes: >
-      vLLM's NVFP4 backend uses is_device_capability_family(100) which matches
-      SM10.x Blackwell but not SM11.x Thor. This patch adds SM110 to the
-      NVFP4 code-path and excludes it from the broken Triton MXFP4 kernels.
+      Two separate SM110 issues are addressed by this patch:
+
+      (A) NVFP4 backend selection — mxfp4.py and the fused-MoE files use
+      is_device_capability_family(100) which matches SM10.x (datacenter Blackwell)
+      but NOT SM11.x (Thor). This patch adds SM110 to the NVFP4 code-path and
+      excludes it from the broken Triton MXFP4 kernels (issue #29317 on vllm-project).
+      In vLLM >=0.18.0, nvfp4_utils.py centralises linear GEMM selection and already
+      uses has_device_capability(100) which covers SM110 — so the linear GEMM path
+      works without patching. mxfp4.py and the MoE files still need patching.
+      In flashinfer_fp4_moe.py >=0.18.0, only the CUTEDSL function still uses
+      is_device_capability_family(100); the CUTLASS function already uses
+      has_device_capability(100). The patch for that file is still correct.
+
+      (B) Conv3dLayer cuBLAS crash — NEW in vLLM 0.18.0. The Qwen3-VL vision
+      encoder PatchEmbed uses Conv3dLayer (model_executor/layers/conv.py). On SM110,
+      CustomOp dispatches to forward_native() (SM110 not in compiled CUDA archs),
+      which calls _forward_mulmat() → F.linear() → cuBLAS. On sm11.0a,
+      cublasLtCreate fails (CUBLAS_STATUS_NOT_INITIALIZED). Fix: guard
+      _forward_mulmat with a capability check and fall back to _forward_conv()
+      (F.conv3d via cuDNN) on SM110. Also guards the torch-2.9.x branch in
+      forward_cuda() for the same reason.
+
+      No upstream PR has landed SM110 support as of 0.18.0 — the patch remains
+      necessary across the full applies_to range.
     applies_to:
       ">=0.8.0,<99.0.0": true
 

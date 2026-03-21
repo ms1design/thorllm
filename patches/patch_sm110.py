@@ -2,21 +2,45 @@
 """
 patches/patch_sm110.py — NVFP4 SM110 (Jetson Thor) capability family fix
 
-Problem:
-  vLLM's NVFP4 backend selection calls is_device_capability_family(100) which
-  matches SM10.x (datacenter Blackwell B100/B200/GB10) but NOT SM11.x (Thor,
-  SM 11.0a). Without this patch the NVFP4 path falls back to Marlin kernels,
-  which are 40-60% slower than the native CUTLASS FP4 path.
+Problem A — NVFP4 backend selection (affects vLLM < 0.18.0 primarily for MoE):
+  vLLM's NVFP4 MoE backend selection calls is_device_capability_family(100)
+  which matches SM10.x (datacenter Blackwell B100/B200/GB10) but NOT SM11.x
+  (Thor, SM 11.0a). Without this patch the NVFP4 MoE path falls back to Marlin
+  kernels, which are 40-60% slower than the native CUTLASS FP4 path.
+
+  The GEMM (linear) backend in vLLM >=0.18.0 was centralised in nvfp4_utils.py
+  which uses has_device_capability(100) — SM110 (110) passes this check, so the
+  linear GEMM backend selection is already correct in >=0.18.0 without patching.
 
   Additionally, the Triton MXFP4 backend must be explicitly EXCLUDED for SM110
   because Triton FP4 kernels fail on SM110 (works on SM90/SM100/SM120 only).
+  See: https://github.com/vllm-project/vllm/issues/29317
 
-Affected files (5):
+Problem B — Conv3dLayer crash on SM110 (NEW in vLLM 0.18.0):
+  vLLM 0.18.0 added model_executor/layers/conv.py with Conv3dLayer used by the
+  Qwen3-VL vision encoder's PatchEmbed (qwen3_vl.py). On SM110, the CustomOp
+  dispatch selects forward_native() (SM110 is not in vLLM's compiled CUDA archs),
+  which calls _forward_mulmat() → F.linear() → cuBLAS. On sm11.0a, cublasLtCreate
+  fails with CUBLAS_STATUS_NOT_INITIALIZED. The fix forces _forward_conv()
+  (F.conv3d via cuDNN, which works fine) when running on SM110.
+
+  Stack: embed_multimodal → Qwen3VisionPatchEmbed.forward → self.proj (Conv3dLayer)
+    → CustomOp.forward → forward_native → _forward_mulmat → F.linear → CRASH
+
+Affected files (6):
   vllm/model_executor/layers/quantization/mxfp4.py
   vllm/model_executor/layers/fused_moe/flashinfer_cutlass_moe.py
   vllm/model_executor/layers/fused_moe/flashinfer_cutedsl_moe.py
   vllm/model_executor/layers/fused_moe/flashinfer_trtllm_moe.py
   vllm/model_executor/layers/quantization/utils/flashinfer_fp4_moe.py
+  vllm/model_executor/layers/conv.py                              [NEW in 0.18.0]
+
+Note on flashinfer_fp4_moe.py in >=0.18.0:
+  The CUTLASS availability function (is_flashinfer_fp4_cutlass_moe_available)
+  changed from is_device_capability_family(100) to has_device_capability(100),
+  which already covers SM110. Only the CUTEDSL function still needs patching.
+  The patch below will report ALREADY PATCHED or NOT FOUND for the CUTLASS
+  function — that is expected and correct.
 
 Usage:
   python3 patches/patch_sm110.py /path/to/vllm/site-packages
@@ -99,7 +123,7 @@ def patch_file(rel_path: str, replacements: list[tuple[str, str]]) -> None:
 #            NOTE: Triton *attention* backend works fine on SM110. Only the
 #            narrow MXFP4 GEMM kernel path is excluded.
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[1/5] mxfp4.py")
+print("\n[1/6] mxfp4.py")
 patch_file(
     "model_executor/layers/quantization/mxfp4.py",
     [
@@ -126,7 +150,7 @@ patch_file(
 # ─────────────────────────────────────────────────────────────────────────────
 # Patch 2: flashinfer_cutlass_moe.py
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[2/5] flashinfer_cutlass_moe.py")
+print("\n[2/6] flashinfer_cutlass_moe.py")
 patch_file(
     "model_executor/layers/fused_moe/flashinfer_cutlass_moe.py",
     [
@@ -141,7 +165,7 @@ patch_file(
 # ─────────────────────────────────────────────────────────────────────────────
 # Patch 3: flashinfer_cutedsl_moe.py
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[3/5] flashinfer_cutedsl_moe.py")
+print("\n[3/6] flashinfer_cutedsl_moe.py")
 patch_file(
     "model_executor/layers/fused_moe/flashinfer_cutedsl_moe.py",
     [
@@ -156,7 +180,7 @@ patch_file(
 # ─────────────────────────────────────────────────────────────────────────────
 # Patch 4: flashinfer_trtllm_moe.py
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[4/5] flashinfer_trtllm_moe.py")
+print("\n[4/6] flashinfer_trtllm_moe.py")
 patch_file(
     "model_executor/layers/fused_moe/flashinfer_trtllm_moe.py",
     [
@@ -170,8 +194,13 @@ patch_file(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Patch 5: flashinfer_fp4_moe.py
+#
+# In vLLM <0.18.0: both CUTLASS and CUTEDSL functions use is_device_capability_family(100).
+# In vLLM >=0.18.0: CUTLASS function switched to has_device_capability(100) which
+#   already covers SM110 — the old patch string won't match that function (expected).
+#   CUTEDSL function still uses is_device_capability_family(100) — still needs patch.
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n[5/5] flashinfer_fp4_moe.py")
+print("\n[5/6] flashinfer_fp4_moe.py")
 patch_file(
     "model_executor/layers/quantization/utils/flashinfer_fp4_moe.py",
     [
@@ -183,9 +212,69 @@ patch_file(
     ],
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Patch 6: conv.py — Conv3dLayer SM110 cuBLAS crash fix  [NEW in vLLM 0.18.0]
+#
+# vLLM 0.18.0 added Conv3dLayer (model_executor/layers/conv.py) which is used
+# by the Qwen3-VL vision encoder's PatchEmbed. On SM110, CustomOp falls back to
+# forward_native() because SM110 is not in vLLM's compiled CUDA archs. That
+# calls _forward_mulmat() → F.linear() → cuBLAS, which fails on sm11.0a with
+# CUBLAS_STATUS_NOT_INITIALIZED (cublasLtCreate returns error for this arch).
+#
+# Fix: force _forward_conv() (F.conv3d via cuDNN, works fine on SM110) when the
+# device capability major version is 11. Also guard the torch-2.9.x branch in
+# forward_cuda() for the same reason.
+#
+# Note: Conv2dLayer.forward_cuda already calls _forward_conv() unconditionally,
+# and Conv2dLayer.forward_native is not triggered for Qwen3-VL, so only
+# Conv3dLayer needs fixing.
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n[6/6] conv.py (Conv3dLayer — SM110 cuBLAS crash, vLLM >=0.18.0)")
+patch_file(
+    "model_executor/layers/conv.py",
+    [
+        # forward_native: guard _forward_mulmat against SM110
+        (
+            "    def forward_native(self, x: torch.Tensor) -> torch.Tensor:\n"
+            "        \"\"\"Expected input shape: (batch_size, in_channels, time, height, width)\"\"\"\n"
+            "        if self.enable_linear:\n"
+            "            return self._forward_mulmat(x)\n"
+            "        else:\n"
+            "            return self._forward_conv(x)",
+            "    def forward_native(self, x: torch.Tensor) -> torch.Tensor:\n"
+            "        \"\"\"Expected input shape: (batch_size, in_channels, time, height, width)\"\"\"\n"
+            "        # SM110 (Jetson Thor / sm11.0a): cublasLtCreate fails for this arch,\n"
+            "        # so F.linear is broken. Fall back to F.conv3d (cuDNN) instead.\n"
+            "        is_sm110 = (\n"
+            "            torch.cuda.is_available()\n"
+            "            and torch.cuda.get_device_capability()[0] == 11\n"
+            "        )\n"
+            "        if self.enable_linear and not is_sm110:\n"
+            "            return self._forward_mulmat(x)\n"
+            "        else:\n"
+            "            return self._forward_conv(x)",
+        ),
+        # forward_cuda: guard the torch-2.9.x mulmat branch against SM110 too
+        (
+            "        if self.enable_linear and (is_torch_equal(\"2.9.0\") or is_torch_equal(\"2.9.1\")):\n"
+            "            return self._forward_mulmat(x)\n"
+            "        return self._forward_conv(x)",
+            "        # SM110 (Jetson Thor / sm11.0a): same cuBLAS issue as forward_native.\n"
+            "        is_sm110 = torch.cuda.get_device_capability()[0] == 11\n"
+            "        if self.enable_linear and not is_sm110 and (\n"
+            "            is_torch_equal(\"2.9.0\") or is_torch_equal(\"2.9.1\")\n"
+            "        ):\n"
+            "            return self._forward_mulmat(x)\n"
+            "        return self._forward_conv(x)",
+        ),
+    ],
+)
+
 print("\nSM110 patch complete.")
 print(
     "Backup files (.pre_sm110_patch) written next to each patched file.\n"
-    "To verify: grep -r 'is_device_capability_family(110)' "
-    f"{VLLM_ROOT}/model_executor/layers/"
+    "To verify NVFP4 fixes: grep -r 'is_device_capability_family(110)' "
+    f"{VLLM_ROOT}/model_executor/layers/\n"
+    "To verify conv.py fix: grep -A4 'is_sm110' "
+    f"{VLLM_ROOT}/model_executor/layers/conv.py"
 )
