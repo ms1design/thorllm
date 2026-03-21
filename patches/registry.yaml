@@ -36,22 +36,34 @@ patches:
       (F.conv3d via cuDNN) on SM110. Also guards the torch-2.9.x branch in
       forward_cuda() for the same reason.
 
-      (C) modelopt cuBLAS INVALID_VALUE — NEW in vLLM 0.18.0. When a ModelOpt
-      quantized model (e.g. NVIDIA Nemotron) is loaded with torch.compile,
-      inductor traces weight.T as a column-major reinterpret_tensor with strides
-      (1, K). On SM110 JetPack cuBLAS, cublasGemmEx rejects this layout with
-      CUBLAS_STATUS_INVALID_VALUE. Fix: inject weight = weight.contiguous()
-      before the apply_fp8_linear / ops.scaled_fp8_quant call in modelopt.py
-      so that inductor always emits a row-major mm argument.
+      (C) modelopt / CUBLAS_STATUS_INVALID_VALUE — vLLM 0.18.0 refactored
+      FP8/Int8 kernel selection into kernels/linear/scaled_mm/cutlass.py.
+      CutlassInt8ScaledMMLinearKernel.process_weights_after_loading stores the
+      transposed weight as weight.t().data — a non-contiguous view with
+      column-major strides (1, K). torch.inductor captures the strides and
+      emits reinterpret_tensor(weight, (K, N), (1, K), 0). JetPack cuBLAS on
+      SM110 rejects CUDA_R_16BF operands with that stride layout and returns
+      CUBLAS_STATUS_INVALID_VALUE. Fix: change to weight.t().contiguous().data.
+      Additionally, CutlassInt8ScaledMMLinearKernel.is_supported() returns True
+      for any CUDA device; adding an SM110 guard makes it fall through to
+      TritonInt8ScaledMMLinearKernel which works on SM11.x.
 
-      (D) FP8 CUTLASS Error Internal — NEW in vLLM 0.18.0. The CUTLASS FP8
-      scaled_mm kernel is compiled only for SM89/SM90/SM100 — NOT SM11.x. When
-      running an FP8 model (e.g. Qwen3-FP8) the capability check
-      cutlass_scaled_mm_supported passes (11.0 >= 8.9) but the kernel crashes at
-      runtime with RuntimeError: Error Internal. Fix: add a SM110 guard that
-      forces the fallback path (scaled_fp8_quant + torch.mm) on SM11.x.
+      (D) FP8 CUTLASS Error Internal — CutlassFP8ScaledMMLinearKernel.is_supported()
+      also returns True unconditionally. The CUTLASS FP8 kernel targets only
+      SM89/SM90/SM100; on SM11.x it raises RuntimeError: Error Internal at launch.
+      Fix: same is_supported() guard as (C); SM110 falls through to
+      PerTensorTorchFP8ScaledMMLinearKernel (torch._scaled_mm), which is safe.
 
-      No upstream PR has landed SM110 support for (C) or (D) as of 0.18.0.
+      Note on anchor changes vs 0.18.0:
+        - flashinfer_cutlass_moe.py: already includes SM110/SM120 upstream —
+          patch 2 is a documented no-op.
+        - flashinfer_cutedsl_moe.py and flashinfer_trtllm_moe.py: use a local
+          alias `p = current_platform` so the correct anchor is
+          `p.is_device_capability_family(100)`, not `current_platform.`.
+        - flashinfer_fp4_moe.py: uses has_device_capability(100) which already
+          covers SM110 — patch 5 is a documented no-op.
+        - modelopt.py / fp8.py: flat dispatch removed in 0.18.0; patches 7/8
+          for those files are retained as legacy no-ops for older vLLM.
     applies_to:
       ">=0.8.0,<99.0.0": true
 
@@ -94,4 +106,4 @@ patches:
       and this patch must NOT be applied (would cause duplicate-argument error).
     applies_to:
       ">=0.8.0,<0.16.0": true
-      ">=0.16.0": false
+      ">=0.16.0":         false
