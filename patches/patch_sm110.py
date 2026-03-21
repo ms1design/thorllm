@@ -270,11 +270,133 @@ patch_file(
     ],
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Patch 7: modelopt.py — force contiguous weight before mm on SM110
+#           (fixes CUBLAS_STATUS_INVALID_VALUE with Nemotron / modelopt models)
+#
+# Problem: When torch.inductor compiles an FP8 linear layer from a ModelOpt
+#   quantized model, it traces weight.T as a *view* rather than a copy:
+#
+#     reinterpret_tensor(weight, (K, N), (1, K), 0)   # strides (1, K) = col-major
+#
+#   On SM110 (Jetson Thor / JetPack cuBLAS) cublasGemmEx with CUDA_R_16BF
+#   raises CUBLAS_STATUS_INVALID_VALUE for this non-standard stride layout.
+#   The fix forces a contiguous copy of the weight before the linear call so
+#   that inductor always emits a row-major mm argument.
+#
+# Target in ModeloptFp8LinearMethod.apply (or equivalent):
+#   The apply method calls F.linear / torch.mm with a weight that may be
+#   non-contiguous after quantization dequantization.  We inject
+#   weight = weight.contiguous() before the call on SM110.
+#
+# Note: vLLM 0.18.0 may expose this through either:
+#   model_executor/layers/quantization/modelopt.py        (preferred target)
+#   model_executor/layers/quantization/nvidia_modelopt.py (older layout)
+# Both files are patched; whichever is missing just prints SKIP.
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n[7/8] modelopt.py — force contiguous weight on SM110 (cuBLAS fix)")
+
+_MODELOPT_CONTIGUOUS_GUARD = """\
+        # thorllm SM110: force weight to be C-contiguous before mm so that
+        # torch.inductor does not emit a column-major reinterpret_tensor that
+        # triggers CUBLAS_STATUS_INVALID_VALUE on JetPack cuBLAS (sm11.0a).
+        import torch as _torch
+        if (
+            _torch.cuda.is_available()
+            and _torch.cuda.get_device_capability()[0] == 11
+            and not weight.is_contiguous()
+        ):
+            weight = weight.contiguous()
+"""
+
+for _modelopt_file in (
+    "model_executor/layers/quantization/modelopt.py",
+    "model_executor/layers/quantization/nvidia_modelopt.py",
+):
+    patch_file(
+        _modelopt_file,
+        [
+            # Target the apply() method just before the output = F.linear / mm call.
+            # We anchor on `output_dtype` assignment or the output = ... line so the
+            # patch is as narrow as possible and survives minor whitespace changes.
+            (
+                "        output = apply_fp8_linear(\n",
+                _MODELOPT_CONTIGUOUS_GUARD
+                + "        output = apply_fp8_linear(\n",
+            ),
+            # Fallback anchor used in some vLLM 0.18.x variants that call
+            # ops.scaled_fp8_quant or torch.mm directly:
+            (
+                "        out = ops.scaled_fp8_quant(\n",
+                _MODELOPT_CONTIGUOUS_GUARD.replace("weight", "weight")
+                + "        out = ops.scaled_fp8_quant(\n",
+            ),
+        ],
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Patch 8: fp8.py — exclude SM110 from cutlass_scaled_mm dispatch
+#           (fixes RuntimeError: Error Internal for Qwen3-FP8 and similar)
+#
+# Problem: vLLM's FP8 linear method dispatches to ops.cutlass_scaled_mm when
+#   the GPU supports it (capability >= 8.9).  SM110 satisfies this check
+#   (11.0 >= 8.9) but the CUTLASS FP8 kernel is NOT compiled for SM11.x —
+#   it only targets SM89 (Ada), SM90 (Hopper), SM100 (Blackwell).  At
+#   runtime the kernel returns CUDA "Error Internal" and the engine aborts.
+#
+# Fix: add a SM110 guard to the cutlass availability check so that SM110
+#   falls through to the fallback path (scaled_fp8_quant + torch.mm).
+#
+# The two most common guard shapes in vLLM 0.18.0 fp8.py are:
+#   (A) cutlass_fp8_supported = ops.cutlass_scaled_mm_supported(capability)
+#   (B) if ops.cutlass_scaled_mm_supported(capability):
+# We patch both.
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n[8/8] fp8.py — exclude SM110 from cutlass_scaled_mm (Error Internal fix)")
+patch_file(
+    "model_executor/layers/quantization/fp8.py",
+    [
+        # Guard shape A — assignment form
+        (
+            "        cutlass_fp8_supported = ops.cutlass_scaled_mm_supported(\n"
+            "            capability)\n",
+            "        # thorllm SM110: CUTLASS FP8 kernels target SM89/SM90/SM100\n"
+            "        # only — SM110 (Thor) returns 'Error Internal' at runtime.\n"
+            "        # Force the fallback (scaled_fp8_quant + torch.mm) on SM110.\n"
+            "        _is_sm110 = (capability[0] == 11)\n"
+            "        cutlass_fp8_supported = (\n"
+            "            ops.cutlass_scaled_mm_supported(capability)\n"
+            "            and not _is_sm110\n"
+            "        )\n",
+        ),
+        # Guard shape B — single-line assignment (common in 0.18.x)
+        (
+            "        cutlass_fp8_supported = ops.cutlass_scaled_mm_supported(capability)\n",
+            "        # thorllm SM110: exclude from CUTLASS FP8 (not compiled for SM11.x)\n"
+            "        _is_sm110 = (capability[0] == 11)\n"
+            "        cutlass_fp8_supported = (\n"
+            "            ops.cutlass_scaled_mm_supported(capability) and not _is_sm110\n"
+            "        )\n",
+        ),
+        # Guard shape C — inline if (some 0.18.x minor variants)
+        (
+            "        if ops.cutlass_scaled_mm_supported(capability):\n",
+            "        # thorllm SM110: CUTLASS FP8 not compiled for SM11.x — fall back\n"
+            "        _is_sm110 = (capability[0] == 11)\n"
+            "        if ops.cutlass_scaled_mm_supported(capability) and not _is_sm110:\n",
+        ),
+    ],
+)
+
 print("\nSM110 patch complete.")
 print(
     "Backup files (.pre_sm110_patch) written next to each patched file.\n"
     "To verify NVFP4 fixes: grep -r 'is_device_capability_family(110)' "
     f"{VLLM_ROOT}/model_executor/layers/\n"
     "To verify conv.py fix: grep -A4 'is_sm110' "
-    f"{VLLM_ROOT}/model_executor/layers/conv.py"
+    f"{VLLM_ROOT}/model_executor/layers/conv.py\n"
+    "To verify modelopt fix: grep -A4 'thorllm SM110' "
+    f"{VLLM_ROOT}/model_executor/layers/quantization/modelopt.py\n"
+    "To verify fp8 fix:     grep -A4 'thorllm SM110' "
+    f"{VLLM_ROOT}/model_executor/layers/quantization/fp8.py"
 )

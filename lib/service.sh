@@ -77,7 +77,7 @@ _check_env_staleness() {
 # reloads systemd and optionally restarts the service.  Use this after a
 # thorllm git pull to pick up env/template fixes without a full reinstall.
 run_reconfigure() {
-    step "Reconfiguring thorllm (env file + launcher)"
+    step "Reconfiguring thorllm (env file + launcher + patches)"
 
     source "${LIB_DIR}/config.sh"
     config_load
@@ -90,6 +90,12 @@ run_reconfigure() {
     echo ""
     success "vllm.env and vllm-serve.sh regenerated."
 
+    # Re-apply vLLM patches so that a 'git pull && thorllm reconfigure' picks
+    # up any new patch files without requiring a full reinstall.
+    echo ""
+    source "${LIB_DIR}/install.sh"
+    apply_vllm_patches
+
     # Reload systemd so it picks up any unit-file changes
     if sudo systemctl daemon-reload 2>/dev/null; then
         success "systemd daemon reloaded."
@@ -99,6 +105,24 @@ run_reconfigure() {
 
     echo ""
     echo "  Changes take effect on next start.  To apply immediately:"
+    echo ""
+    echo "    thorllm restart"
+    echo ""
+}
+
+# ── Standalone patch application (thorllm patch) ──────────────────────────────
+run_patch() {
+    step "Applying vLLM patches"
+
+    source "${LIB_DIR}/config.sh"
+    config_load
+
+    source "${LIB_DIR}/install.sh"
+    apply_vllm_patches
+
+    echo ""
+    success "Patch run complete."
+    echo "  Restart the service to load the patched code:"
     echo ""
     echo "    thorllm restart"
     echo ""

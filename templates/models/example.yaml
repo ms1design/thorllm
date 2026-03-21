@@ -19,21 +19,44 @@ gpu_memory_utilization: 0.90
 max_model_len: 32768
 
 # ── Attention ─────────────────────────────────────────────────────────────────
-attention_backend: FLASHINFER
+# attention_backend: FLASHINFER
 
 # ── Performance ───────────────────────────────────────────────────────────────
 enable_chunked_prefill: true
 enable_prefix_caching: true
 
 # ── Quantization (uncomment as needed) ───────────────────────────────────────
-# quantization: fp8
-# kv_cache_dtype: fp8
+# quantization: fp8          # FP8
+# quantization: modelopt     # NVIDIA ModelOpt FP8 (e.g. Nemotron)
+# quantization: modelopt_fp4 # NVIDIA ModelOpt NVFP4 (e.g. Qwen3.5-NVFP4)
 
-# ── Reasoning / speculative decoding (model-specific) ────────────────────────
-# reasoning_parser: qwen3
+# ── KV Cache dtype ────────────────────────────────────────────────────────────
+# kv_cache_dtype: fp8        # FP8 KV cache (only with fp8 / modelopt quant)
+# kv-cache-dtype: fp8_e4m3
+
+# ── Tools ─────────────────────────────────────────────────────────────────────
+enable-auto-tool-choice: false
+# tool-call-parser: qwen3_coder
+
+# ── Reasoning parser (pick ONE — must match the model family) ─────────────────
+# reasoning_parser: qwen3         # Qwen3 / Qwen3.5 family
+# reasoning_parser: deepseek_r1   # DeepSeek-R1 / R1-Distill family
+# reasoning_parser: nano_v3       # NVIDIA Nemotron-Nano / Nano-4B
+# reasoning_parser: qwq           # QwQ models
+
+# ── Speculative decoding (model-specific) ─────────────────────────────────────
 # speculative_config:
-#   method: qwen3_next_mtp
-#   num_speculative_tokens: 2
+#   method: mtp                # Qwen3.5: use 'mtp' for native MTP head
+#   num_speculative_tokens: 1
+#   model: ${MODEL_NAME}       # draft model (same as main for MTP)
+
+# ── SM110 (Jetson Thor) fallback ──────────────────────────────────────────────
+# If patch_sm110.py and patch_mtp_nvfp4.py have been applied and a model still
+# crashes during torch.compile warm-up (CUBLAS_STATUS_INVALID_VALUE or
+# cutlass_scaled_mm Error Internal), add the line below.  It disables
+# torch.compile entirely and falls back to eager-mode PyTorch — slower but
+# stable on SM110 for models whose compiled path is not yet supported.
+# enforce_eager: true
 
 # ── Trust remote code (required for some HF models) ──────────────────────────
 # trust_remote_code: true

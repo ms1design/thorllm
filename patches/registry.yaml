@@ -11,11 +11,10 @@
 # =============================================================================
 
 patches:
-patches:
   patch_sm110:
-    description: "SM110 (Jetson Thor) CUTLASS NVFP4 capability-family fix + Conv3dLayer cuBLAS crash fix"
+    description: "SM110 (Jetson Thor) CUTLASS NVFP4 capability-family fix + Conv3dLayer cuBLAS crash fix + modelopt cuBLAS contiguous fix + FP8 CUTLASS Error Internal fix"
     notes: >
-      Two separate SM110 issues are addressed by this patch:
+      Four separate SM110 issues are addressed by this patch:
 
       (A) NVFP4 backend selection — mxfp4.py and the fused-MoE files use
       is_device_capability_family(100) which matches SM10.x (datacenter Blackwell)
@@ -37,10 +36,51 @@ patches:
       (F.conv3d via cuDNN) on SM110. Also guards the torch-2.9.x branch in
       forward_cuda() for the same reason.
 
-      No upstream PR has landed SM110 support as of 0.18.0 — the patch remains
-      necessary across the full applies_to range.
+      (C) modelopt cuBLAS INVALID_VALUE — NEW in vLLM 0.18.0. When a ModelOpt
+      quantized model (e.g. NVIDIA Nemotron) is loaded with torch.compile,
+      inductor traces weight.T as a column-major reinterpret_tensor with strides
+      (1, K). On SM110 JetPack cuBLAS, cublasGemmEx rejects this layout with
+      CUBLAS_STATUS_INVALID_VALUE. Fix: inject weight = weight.contiguous()
+      before the apply_fp8_linear / ops.scaled_fp8_quant call in modelopt.py
+      so that inductor always emits a row-major mm argument.
+
+      (D) FP8 CUTLASS Error Internal — NEW in vLLM 0.18.0. The CUTLASS FP8
+      scaled_mm kernel is compiled only for SM89/SM90/SM100 — NOT SM11.x. When
+      running an FP8 model (e.g. Qwen3-FP8) the capability check
+      cutlass_scaled_mm_supported passes (11.0 >= 8.9) but the kernel crashes at
+      runtime with RuntimeError: Error Internal. Fix: add a SM110 guard that
+      forces the fallback path (scaled_fp8_quant + torch.mm) on SM11.x.
+
+      No upstream PR has landed SM110 support for (C) or (D) as of 0.18.0.
     applies_to:
       ">=0.8.0,<99.0.0": true
+
+  patch_mtp_nvfp4:
+    description: "NVFP4 MTP speculative-decoding weight shape assertion fix"
+    notes: >
+      When a Qwen3.5-NVFP4 model is loaded with speculative decoding using
+      method='mtp', vLLM builds a Qwen3_5MTPDraftModel from the same NVFP4
+      checkpoint. The FP4-packed weight tensors in the checkpoint have a
+      different shape than the parameter tensors allocated by the MTP draft
+      head's ColumnParallelLinear initializer. The generic weight_loader_v2
+      path calls load_column_parallel_weight which asserts:
+
+          assert self.data.shape == loaded_weight.shape  # parameter.py:153
+
+      The mismatch (packed inner dim vs expected full width) fires this
+      assertion and aborts the engine.
+
+      Two-file fix:
+        (1) parameter.py — replace the bare assert with a shape-adaptive check:
+            when numel matches, reshape loaded_weight to fit self.data; when
+            numel genuinely differs, raise a descriptive AssertionError.
+        (2) qwen3_5_mtp.py — belt-and-suspenders try/except around the
+            weight_loader call in load_weights; retries with a reshape on
+            AssertionError, re-raises only for true mismatches.
+
+      From vLLM 0.18.0 the MTP weight loading path is unchanged upstream.
+    applies_to:
+      ">=0.18.0,<99.0.0": true
 
   # patch_layernorm is temporarily disabled — does not work reliably.
   # Symptom: RMSNormGated missing 'activation' attribute in vLLM < 0.16.0.
@@ -54,4 +94,4 @@ patches:
       and this patch must NOT be applied (would cause duplicate-argument error).
     applies_to:
       ">=0.8.0,<0.16.0": true
-      ">=0.16.0":         false
+      ">=0.16.0": false

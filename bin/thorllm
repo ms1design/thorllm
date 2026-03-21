@@ -40,6 +40,8 @@ Install:
   install --update       Update vLLM to latest version
   reconfigure            Regenerate vllm.env + launcher from current templates
                          (use after 'git pull' to apply env fixes without reinstalling)
+  patch                  (Re-)apply all vLLM patches from patches/registry.yaml
+                         (use after 'git pull' to apply new patches to an existing install)
 
 Service:
   start [-p PORT]        Start the vLLM service
@@ -120,6 +122,7 @@ while [[ $# -gt 0 ]]; do
         setup)    CMD=setup;         shift ;;
         install)  CMD=install;       shift ;;
         reconfigure) CMD=reconfigure; shift ;;
+        patch)    CMD=patch;        shift ;;
         start)    CMD=start;       shift ;;
         stop)     CMD=stop;        shift ;;
         restart)  CMD=restart;     shift ;;
@@ -175,6 +178,10 @@ case "${CMD:-}" in
     reconfigure)
         source "${LIB_DIR}/service.sh"
         run_reconfigure
+        ;;
+    patch)
+        source "${LIB_DIR}/service.sh"
+        run_patch
         ;;
     start|stop|restart|status)
         source "${LIB_DIR}/service.sh"
