@@ -120,11 +120,53 @@ run_patch() {
     source "${LIB_DIR}/install.sh"
     apply_vllm_patches
 
+    # Compiled kernel graphs from before the patch reference the old code paths.
+    # They must be deleted so vLLM recompiles with the patched selection logic.
+    clear_compile_cache
+
     echo ""
     success "Patch run complete."
     echo "  Restart the service to load the patched code:"
     echo ""
     echo "    thorllm restart"
+    echo ""
+}
+
+# ── Compile-cache clearing ────────────────────────────────────────────────────
+# torch.inductor and torch.compile cache compiled kernel artifacts on disk.
+# After patching vLLM's kernel-selection code, those cached graphs still
+# reference the OLD dispatch paths (e.g. CutlassFP8 for SM110) and are loaded
+# directly on the next run, completely bypassing the patched is_supported()
+# logic.  Clearing the cache forces a fresh compile that uses the patched code.
+clear_compile_cache() {
+    source "${LIB_DIR}/config.sh"
+    config_load
+
+    local cache_root="${CACHE_ROOT:-${HOME}/.cache/vllm}"
+    local cleared=0
+
+    step "Clearing compile caches"
+    echo ""
+
+    for cache_dir in \
+        "${cache_root}/inductor" \
+        "${cache_root}/torch_compile" \
+        "${cache_root}/triton" \
+        "${cache_root}/flashinfer"
+    do
+        if [[ -d "${cache_dir}" ]]; then
+            info "  Removing: ${cache_dir}"
+            rm -rf "${cache_dir}"
+            cleared=$(( cleared + 1 ))
+        fi
+    done
+
+    if (( cleared > 0 )); then
+        success "Cleared ${cleared} cache director(ies)."
+        echo "  vLLM will recompile kernels on the next start (first start will be slower)."
+    else
+        info "No compile caches found — nothing to clear."
+    fi
     echo ""
 }
 

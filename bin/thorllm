@@ -42,6 +42,8 @@ Install:
                          (use after 'git pull' to apply env fixes without reinstalling)
   patch                  (Re-)apply all vLLM patches from patches/registry.yaml
                          (use after 'git pull' to apply new patches to an existing install)
+  clearcache             Delete torch.inductor / torch.compile / Triton / FlashInfer caches
+                         (required after patching to force recompile with corrected kernel selection)
 
 Service:
   start [-p PORT]        Start the vLLM service
@@ -123,6 +125,7 @@ while [[ $# -gt 0 ]]; do
         install)  CMD=install;       shift ;;
         reconfigure) CMD=reconfigure; shift ;;
         patch)    CMD=patch;        shift ;;
+        clearcache) CMD=clearcache; shift ;;
         start)    CMD=start;       shift ;;
         stop)     CMD=stop;        shift ;;
         restart)  CMD=restart;     shift ;;
@@ -182,6 +185,10 @@ case "${CMD:-}" in
     patch)
         source "${LIB_DIR}/service.sh"
         run_patch
+        ;;
+    clearcache)
+        source "${LIB_DIR}/service.sh"
+        clear_compile_cache
         ;;
     start|stop|restart|status)
         source "${LIB_DIR}/service.sh"

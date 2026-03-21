@@ -152,23 +152,30 @@ patch_file(
 # Patch 2: qwen3_5_mtp.py — belt-and-suspenders around weight_loader call.
 #
 # Even after the parameter.py fix, a completely unrecoverable shape mismatch
-# could abort the engine.  This wrapper catches AssertionError on the
-# weight_loader call inside load_weights, attempts a reshape, and re-raises
-# only when the mismatch is genuinely unrecoverable.
-#
-# Target (line ~319):
-#     weight_loader(param, loaded_weight)
-#
-# The replacement wraps just that one call; all other logic in load_weights
-# remains untouched.
+# Idempotency note: the bare call line "                    weight_loader(param, loaded_weight)\n"
+# (20 spaces) is a suffix-substring of the replacement body line
+# "                        weight_loader(param, loaded_weight)\n" (24 spaces).
+# Using the bare call as anchor causes the patch to re-apply on every run,
+# producing nested try-blocks and an IndentationError.
+# Fix: anchor on the weight_loader = getattr(...) block that precedes the call;
+# that block appears verbatim at the top of the replacement, so "old in new" is
+# True for the prefix — but the full old string (ending with the bare call at
+# 20 spaces) is NOT a substring of new (new ends that block with the try-except
+# at 24 spaces), making the patch idempotent.
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n[2/2] qwen3_5_mtp.py — weight_loader call guard")
 patch_file(
     "model_executor/models/qwen3_5_mtp.py",
     [
         (
+            "                    weight_loader = getattr(\n"
+            "                        param, \"weight_loader\", default_weight_loader\n"
+            "                    )\n"
             "                    weight_loader(param, loaded_weight)\n",
             # ── replacement ──────────────────────────────────────────────────
+            "                    weight_loader = getattr(\n"
+            "                        param, \"weight_loader\", default_weight_loader\n"
+            "                    )\n"
             "                    # thorllm: NVFP4-MTP — guard against packed-\n"
             "                    # weight shape mismatches (see patch_mtp_nvfp4.py).\n"
             "                    try:\n"
