@@ -356,7 +356,7 @@ exit(0)
                 should_apply=true
             else
                 info "  Skipping ${patch_name} (v${vllm_ver} outside range: ${range_spec})"
-                ((patches_skipped++))
+                patches_skipped=$(( patches_skipped + 1 ))
             fi
         else
             should_apply=true
@@ -366,14 +366,14 @@ exit(0)
             info "Applying ${patch_name}..."
             if "${venv_python}" "${patch_dir}/${patch_file}"; then
                 success "${patch_name}: complete"
-                ((patches_applied++))
+                patches_applied=$(( patches_applied + 1 ))
             else
                 warn "${patch_name} failed"
-                ((patches_skipped++))
+                patches_skipped=$(( patches_skipped + 1 ))
             fi
         elif [[ "${should_apply}" == "true" && ! -f "${patch_dir}/${patch_file}" ]]; then
             warn "${patch_name}: patch file not found (${patch_file}) — skipping"
-            ((patches_skipped++))
+            patches_skipped=$(( patches_skipped + 1 ))
         fi
     done < <(
         "${venv_python}" -c "

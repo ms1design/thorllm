@@ -170,7 +170,7 @@ _model_select_interactive() {
             local marker="  ○"
             [[ "${m}" == "${active}" ]] && marker="  ●"
             echo -e "${marker} ${i}) ${m}"
-            (( i++ ))
+            i=$(( i + 1 ))
         done
         echo ""
         read -r -p "$(echo -e "Select number [1-${#models[@]}]: ")" choice
