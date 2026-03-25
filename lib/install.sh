@@ -265,7 +265,7 @@ except Exception:
             --index-url https://flashinfer.ai/whl/cu130 --prerelease=allow
     fi
 
-    uv pip install "numba==${NUMBA_VERSION}" nvidia-cutlass-dsl
+    uv pip install "numba==${NUMBA_VERSION}" nvidia-cutlass-dsl transformers
     success "Dependencies installed."
 }
 

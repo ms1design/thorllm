@@ -103,3 +103,13 @@ patches:
     applies_to:
       ">=0.8.0,<0.16.0": true
       ">=0.16.0":         false
+
+  patch_fa4_sm110:
+    description: "FA4 (FlashAttention 4) auto-selection for SM110 (Jetson Thor)"
+    notes: >
+      fa_utils.py get_flash_attn_version() only maps major==10 (SM100 Blackwell)
+      to FA4. SM110 (major=11) falls to FA2 even though _is_fa4_supported()
+      explicitly includes is_device_capability_family(110).
+      This patch extends the branch to cover major==11.
+    applies_to:
+      ">=0.18.0,<99.0.0": true
